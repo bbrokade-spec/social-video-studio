@@ -1,29 +1,109 @@
-from fastapi import Depends, FastAPI, Header, HTTPException
+from urllib.parse import urljoin
+
+from fastapi import Depends, FastAPI, HTTPException, Security
+from fastapi.security.api_key import APIKeyHeader
 
 from .config import settings
-from .hf_gradio import generate_wan, get_zimage_events, submit_zimage, _find_filedata
+from .hf_gradio import (
+    _find_filedata,
+    _validate_public_image_url,
+    generate_wan,
+    get_zimage_events,
+    submit_zimage,
+)
 from .schemas import (
-    ImageRequest,
-    VideoRequest,
-    ImageJobSubmitResponse,
     ImageJobResultResponse,
+    ImageJobSubmitResponse,
+    ImageRequest,
+    ImageToVideoPipelineRequest,
+    ImageToVideoPipelineResponse,
+    VideoRequest,
     VideoResultResponse,
 )
 
 app = FastAPI(
     title="Social Video Studio API",
-    version="0.2.0",
+    version="0.3.0",
     description="Orchestration API for FINOMICS image and video generation.",
 )
 
+api_key_header = APIKeyHeader(
+    name="X-API-Key",
+    scheme_name="ApiKeyAuth",
+    auto_error=False,
+)
 
-def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
+
+def require_api_key(x_api_key: str | None = Security(api_key_header)) -> None:
     if settings.allow_unauthenticated_generation:
         return
     if not settings.api_key:
         raise HTTPException(503, "Set API_KEY before enabling generation endpoints.")
     if x_api_key != settings.api_key:
         raise HTTPException(401, "Missing or invalid API key.")
+
+
+def _wan_payload(input_image: str, video) -> dict:
+    return {
+        "input_image": _validate_public_image_url(input_image),
+        "prompt": video.prompt,
+        "negative_prompt": video.negative_prompt or "",
+        "duration_seconds": video.duration_seconds,
+        "steps": video.steps,
+        "guidance_scale": video.guidance_scale,
+        "guidance_scale_2": video.guidance_scale_2,
+        "seed": video.seed,
+        "randomize_seed": video.randomize_seed,
+    }
+
+
+async def _run_image_to_video(image_request: ImageRequest, video_request):
+    # Submit image job using the six positional inputs from the Z-Image OpenAPI schema.
+    event_id = await submit_zimage(
+        {
+            "data": [
+                image_request.prompt,
+                image_request.resolution,
+                image_request.seed,
+                image_request.steps,
+                image_request.shift,
+                image_request.random_seed,
+            ]
+        }
+    )
+
+    # The Z-Image endpoint returns its result through an SSE completion event.
+    events = await get_zimage_events(event_id)
+    if any(event.get("event") == "error" for event in events):
+        raise HTTPException(502, "Z-Image reported a generation error.")
+
+    completed = [event for event in events if event.get("event") == "complete"]
+    if not completed:
+        raise HTTPException(504, "Z-Image did not return a completion event before the wait limit.")
+
+    image_files = []
+    for event in completed:
+        image_files.extend(_find_filedata(event.get("data")))
+
+    image_file = next(
+        (
+            item for item in image_files
+            if isinstance(item.get("url"), str) and item["url"].strip()
+        ),
+        None,
+    )
+    if not image_file:
+        raise HTTPException(502, "Z-Image completed but did not return a downloadable image URL.")
+
+    image_url = urljoin(settings.zimage_base_url.rstrip("/") + "/", image_file["url"])
+    video_result = await generate_wan(_wan_payload(image_url, video_request))
+
+    return ImageToVideoPipelineResponse(
+        status="completed",
+        image_event_id=event_id,
+        image=image_file,
+        video=video_result["output"],
+    )
 
 
 @app.get("/health")
@@ -49,7 +129,7 @@ async def providers():
                 "id": "wan-2.2",
                 "base_url": settings.wan_base_url,
                 "mode": "image-to-video",
-                "generation": "synchronous /run/generate_video",
+                "generation": "direct JSON request with FileData response",
             },
         ],
         "token_configured": bool(settings.hf_token),
@@ -63,19 +143,18 @@ async def providers():
     dependencies=[Depends(require_api_key)],
 )
 async def create_image(request: ImageRequest):
-    # Positional list follows the Z-Image Space schema shown in its OpenAPI document:
-    # prompt, resolution, seed, steps, shift, random_seed.
-    payload = {
-        "data": [
-            request.prompt,
-            request.resolution,
-            request.seed,
-            request.steps,
-            request.shift,
-            request.random_seed,
-        ]
-    }
-    event_id = await submit_zimage(payload)
+    event_id = await submit_zimage(
+        {
+            "data": [
+                request.prompt,
+                request.resolution,
+                request.seed,
+                request.steps,
+                request.shift,
+                request.random_seed,
+            ]
+        }
+    )
     return ImageJobSubmitResponse(
         event_id=event_id,
         status="submitted",
@@ -90,17 +169,15 @@ async def create_image(request: ImageRequest):
 )
 async def read_image(event_id: str):
     events = await get_zimage_events(event_id)
-    error_events = [event for event in events if event["event"] == "error"]
-    if error_events:
-        raise HTTPException(502, "Z-Image reported a generation error")
-    complete_events = [event for event in events if event["event"] == "complete"]
+    if any(event.get("event") == "error" for event in events):
+        raise HTTPException(502, "Z-Image reported a generation error.")
+    complete_events = [event for event in events if event.get("event") == "complete"]
     outputs = []
     for event in complete_events:
         outputs.extend(_find_filedata(event.get("data")))
-    status = "completed" if complete_events else "pending"
     return ImageJobResultResponse(
         event_id=event_id,
-        status=status,
+        status="completed" if complete_events else "pending",
         outputs=outputs,
         events=events,
     )
@@ -112,23 +189,16 @@ async def read_image(event_id: str):
     dependencies=[Depends(require_api_key)],
 )
 async def create_video(request: VideoRequest):
-    # Wan Space OpenAPI shows named JSON fields and a direct FileData result.
-    payload = {
-        "input_image": _validate_image_url(str(request.input_image)),
-        "prompt": request.prompt,
-        "negative_prompt": request.negative_prompt or "",
-        "duration_seconds": request.duration_seconds,
-        "steps": request.steps,
-        "guidance_scale": request.guidance_scale,
-        "guidance_scale_2": request.guidance_scale_2,
-        "seed": request.seed,
-        "randomize_seed": request.randomize_seed,
-    }
-    result = await generate_wan(payload)
+    result = await generate_wan(_wan_payload(str(request.input_image), request))
     return VideoResultResponse(output=result["output"], raw_response=result["raw_response"])
 
 
-def _validate_image_url(url: str) -> str:
-    from .hf_gradio import _validate_public_image_url
-
-    return _validate_public_image_url(url)
+@app.post(
+    "/api/v1/pipelines/image-to-video",
+    response_model=ImageToVideoPipelineResponse,
+    dependencies=[Depends(require_api_key)],
+)
+async def create_image_to_video_pipeline(request: ImageToVideoPipelineRequest):
+    # This is a synchronous end-to-end request. Host it on a service that allows
+    # long-running requests; a production queue/worker will replace this route later.
+    return await _run_image_to_video(request.image, request.video)
