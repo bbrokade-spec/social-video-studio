@@ -86,8 +86,58 @@ async function loadAssets() {
   $("assetCount").textContent=assets.length+" assets";
   renderWorkspace();
 }
+function renderScriptStudio(host) {
+  const panel=document.createElement("div"); panel.className="panel"; panel.style.marginBottom="18px";
+  panel.innerHTML='<div class="toolbar"><h2>Script Studio · Create from a script</h2><span class="muted">No footage upload required</span></div><p class="muted">Paste your script, then divide it into scenes. Each scene has narration, a visual prompt and a target duration.</p><label for="planTitle">Video / plan title</label><input id="planTitle" maxlength="120" placeholder="e.g. Why inflation changes purchasing power"><label for="fullScript">Complete script</label><textarea id="fullScript" rows="6" maxlength="30000" style="width:100%;border:1px solid #34445b;background:#0b121c;color:#edf4ff;border-radius:9px;padding:11px;font:inherit;resize:vertical" placeholder="Paste your complete narration script here..."></textarea><div class="row"><div style="flex:1"><label for="scriptProfile">Output format</label><select id="scriptProfile"><option value="vertical">Vertical · 9:16</option><option value="landscape">Landscape · 16:9</option></select></div><div style="flex:1"><label for="savedPlans">Saved plans</label><select id="savedPlans"><option value="">New script plan</option></select></div></div><div class="toolbar" style="margin-top:18px"><h2>Scenes</h2><button class="secondary" id="addScene">+ Add scene</button></div><div id="sceneEditor"></div><div class="actions"><button class="primary" id="savePlan">Save script and scenes</button><button class="secondary" id="newPlan">New plan</button></div><div class="status" id="scriptStatus">Your script plan is saved locally with this project.</div>';
+  host.append(panel);
+  let currentPlanId=null, sceneCount=0;
+  const editor=panel.querySelector("#sceneEditor"), sceneRows=[];
+  const addScene=(scene={})=>{
+    const index=sceneCount++;
+    const card=document.createElement("div");card.style.cssText="border:1px solid #2b3a4e;border-radius:10px;padding:14px;margin:10px 0;background:#0d1520";
+    card.innerHTML='<div class="toolbar"><strong>Scene '+(index+1)+'</strong><button type="button" class="secondary removeScene">Remove</button></div><label>Narration for this scene</label><textarea class="narration" rows="2" maxlength="5000" style="width:100%;border:1px solid #34445b;background:#0b121c;color:#edf4ff;border-radius:9px;padding:10px;font:inherit;resize:vertical"></textarea><label>Visual prompt for AI image generation</label><textarea class="visual" rows="3" maxlength="6000" style="width:100%;border:1px solid #34445b;background:#0b121c;color:#edf4ff;border-radius:9px;padding:10px;font:inherit;resize:vertical"></textarea><label>Negative prompt (optional)</label><input class="negative" maxlength="2000" placeholder="e.g. blurry, text, watermark"><label>Target duration (seconds)</label><input class="duration" type="number" min="0.5" max="30" step="0.5" value="5">';
+    card.querySelector(".narration").value=scene.narration_text||"";
+    card.querySelector(".visual").value=scene.visual_prompt||"";
+    card.querySelector(".negative").value=scene.negative_prompt||"";
+    card.querySelector(".duration").value=scene.duration_seconds??5;
+    card.querySelector(".removeScene").onclick=()=>{card.remove();};
+    editor.append(card);sceneRows.push(card);
+  };
+  const setStatus=(message,error=false)=>{const el=panel.querySelector("#scriptStatus");el.textContent=message;el.className="status"+(error?" error":"");};
+  const loadPlan=async id=>{
+    if(!id){currentPlanId=null;panel.querySelector("#planTitle").value="";panel.querySelector("#fullScript").value="";panel.querySelector("#scriptProfile").value="vertical";editor.replaceChildren();sceneRows.length=0;sceneCount=0;addScene();return;}
+    try{
+      const plan=await request("/api/v1/script-plans/"+id);currentPlanId=plan.id;
+      panel.querySelector("#planTitle").value=plan.title;panel.querySelector("#fullScript").value=plan.full_script;panel.querySelector("#scriptProfile").value=plan.output_profile;
+      editor.replaceChildren();sceneRows.length=0;sceneCount=0;plan.scenes.forEach(addScene);setStatus("Loaded saved plan.");
+    }catch(error){setStatus(error.message,true);}
+  };
+  const refreshPlans=async()=>{
+    const plans=await request("/api/v1/projects/"+activeProject.id+"/script-plans"),select=panel.querySelector("#savedPlans");
+    select.replaceChildren(new Option("New script plan",""));plans.forEach(p=>select.add(new Option(p.title+" · "+p.scenes.length+" scenes",p.id)));
+    if(currentPlanId)select.value=currentPlanId;
+  };
+  panel.querySelector("#addScene").onclick=()=>addScene();
+  panel.querySelector("#newPlan").onclick=()=>{panel.querySelector("#savedPlans").value="";loadPlan("");};
+  panel.querySelector("#savedPlans").onchange=e=>loadPlan(e.target.value);
+  panel.querySelector("#savePlan").onclick=async()=>{
+    const title=panel.querySelector("#planTitle").value.trim(),full_script=panel.querySelector("#fullScript").value.trim();
+    const cards=[...editor.children];
+    const scenes=cards.map(card=>({narration_text:card.querySelector(".narration").value.trim(),visual_prompt:card.querySelector(".visual").value.trim(),negative_prompt:card.querySelector(".negative").value.trim(),duration_seconds:Number(card.querySelector(".duration").value)}));
+    if(!title||!full_script||!scenes.length||scenes.some(x=>!x.narration_text||x.visual_prompt.length<3||!Number.isFinite(x.duration_seconds)||x.duration_seconds<0.5||x.duration_seconds>30)){setStatus("Complete the title, script and each scene. Scene duration must be 0.5 to 30 seconds.",true);return;}
+    const payload={title,full_script,output_profile:panel.querySelector("#scriptProfile").value,scenes};
+    const save=panel.querySelector("#savePlan");save.disabled=true;setStatus("Saving script plan...");
+    try{
+      const plan=await request(currentPlanId?"/api/v1/script-plans/"+currentPlanId:"/api/v1/projects/"+activeProject.id+"/script-plans",{method:currentPlanId?"PUT":"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+      currentPlanId=plan.id;await refreshPlans();setStatus("Saved. "+plan.scenes.length+" scenes are stored with this project.");
+    }catch(error){setStatus(error.message,true);}finally{save.disabled=false;}
+  };
+  addScene();
+  refreshPlans().catch(error=>setStatus(error.message,true));
+}
 function renderWorkspace() {
   const host=$("workspace"); host.replaceChildren();
+  renderScriptStudio(host);
   const upload=document.createElement("div"); upload.className="drop";
   upload.innerHTML='<strong>Add source media</strong><div class="muted" style="margin:5px 0 10px">Video, image, or audio files. Max size is configured by the local server.</div><input id="files" type="file" multiple accept="video/mp4,video/quicktime,video/webm,image/jpeg,image/png,image/webp,audio/mpeg,audio/wav,audio/mp4,text/plain,.srt">';
   host.append(upload);
