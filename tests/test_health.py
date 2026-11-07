@@ -16,3 +16,11 @@ def test_provider_metadata_is_available():
     assert response.status_code == 200
     ids = {item["id"] for item in response.json()["providers"]}
     assert ids == {"z-image-turbo", "wan-2.2"}
+
+
+def test_generation_is_disabled_without_server_api_key(monkeypatch):
+    from app import main
+    monkeypatch.setattr(main.settings, "allow_unauthenticated_generation", False)
+    monkeypatch.setattr(main.settings, "api_key", "")
+    response = client.post("/api/v1/images", json={"prompt": "test prompt"})
+    assert response.status_code == 503
