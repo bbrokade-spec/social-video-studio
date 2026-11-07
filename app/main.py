@@ -1,4 +1,5 @@
 from urllib.parse import urljoin
+import asyncio
 import hashlib
 import secrets
 import uuid
@@ -31,6 +32,8 @@ from .schemas import (
     ProjectResponse,
     AssetResponse,
     MediaExportRequest,
+    ExportJobCreateRequest,
+    ExportJobResponse,
 )
 
 app = FastAPI(
@@ -117,6 +120,150 @@ async def _run_image_to_video(image_request: ImageRequest, video_request):
         video=video_result["output"],
     )
 
+
+
+
+_export_worker_task: asyncio.Task | None = None
+
+
+def _process_next_export_job() -> bool:
+    store = _store()
+    job = store.claim_next_export_job()
+    if not job:
+        return False
+
+    output_path = None
+    try:
+        project_assets = {item["id"]: item for item in store.list_assets(job["project_id"])}
+        selected = []
+        for asset_id in job["asset_ids"]:
+            asset = project_assets.get(asset_id)
+            if not asset or asset["media_type"] not in {
+                "video/mp4", "video/quicktime", "video/webm"
+            }:
+                raise MediaError("An export source is missing or is not a supported video.")
+            stored_name = asset["stored_name"]
+            if Path(stored_name).name != stored_name:
+                raise MediaError("Stored asset metadata is invalid.")
+            source = (store.asset_dir / stored_name).resolve()
+            if source.parent != store.asset_dir.resolve() or not source.is_file():
+                raise MediaError("An export source file is missing.")
+            selected.append(source)
+
+        asset_id = str(uuid.uuid4())
+        stored_name = f"{asset_id}.mp4"
+        output_path = store.asset_dir / stored_name
+        assemble_video(selected, output_path, profile=job["profile"], fps=job["fps"])
+
+        digest = hashlib.sha256()
+        with output_path.open("rb") as rendered:
+            for chunk in iter(lambda: rendered.read(1024 * 1024), b""):
+                digest.update(chunk)
+        asset = store.register_asset({
+            "id": asset_id,
+            "project_id": job["project_id"],
+            "original_name": f"export-{job['profile']}.mp4",
+            "stored_name": stored_name,
+            "media_type": "video/mp4",
+            "size_bytes": output_path.stat().st_size,
+            "sha256": digest.hexdigest(),
+        })
+        store.update_export_job(
+            job["id"], status="completed", progress=100, result_asset_id=asset["id"]
+        )
+    except (MediaError, OSError, StorageError):
+        if output_path:
+            output_path.unlink(missing_ok=True)
+        store.update_export_job(
+            job["id"], status="failed", progress=100,
+            error_message="Export failed. Check that FFmpeg is installed and the source clips are valid.",
+        )
+    except Exception:
+        if output_path:
+            output_path.unlink(missing_ok=True)
+        store.update_export_job(
+            job["id"], status="failed", progress=100,
+            error_message="Export failed due to an unexpected local processing error.",
+        )
+    return True
+
+
+async def _export_worker_loop() -> None:
+    while True:
+        worked = await run_in_threadpool(_process_next_export_job)
+        if not worked:
+            await asyncio.sleep(1.0)
+
+
+@app.on_event("startup")
+async def start_export_worker() -> None:
+    global _export_worker_task
+    _store().recover_interrupted_jobs()
+    if _export_worker_task is None or _export_worker_task.done():
+        _export_worker_task = asyncio.create_task(_export_worker_loop())
+
+
+@app.on_event("shutdown")
+async def stop_export_worker() -> None:
+    global _export_worker_task
+    if _export_worker_task is not None:
+        _export_worker_task.cancel()
+        try:
+            await _export_worker_task
+        except asyncio.CancelledError:
+            pass
+        _export_worker_task = None
+
+
+@app.post(
+    "/api/v1/projects/{project_id}/export-jobs",
+    response_model=ExportJobResponse,
+    status_code=202,
+    dependencies=[Depends(require_api_key)],
+)
+async def create_project_export_job(project_id: str, request: ExportJobCreateRequest):
+    try:
+        project_id = str(uuid.UUID(project_id))
+    except ValueError as exc:
+        raise HTTPException(404, "Project not found.") from exc
+
+    store = _store()
+    if not store.get_project(project_id):
+        raise HTTPException(404, "Project not found.")
+    if len(set(request.asset_ids)) != len(request.asset_ids):
+        raise HTTPException(422, "Duplicate asset IDs are not allowed.")
+
+    project_assets = {item["id"]: item for item in store.list_assets(project_id)}
+    for asset_id in request.asset_ids:
+        asset = project_assets.get(asset_id)
+        if not asset:
+            raise HTTPException(404, "One or more project assets were not found.")
+        if asset["media_type"] not in {"video/mp4", "video/quicktime", "video/webm"}:
+            raise HTTPException(422, "Only video assets can be included in an export.")
+
+    return store.create_export_job({
+        "id": str(uuid.uuid4()),
+        "project_id": project_id,
+        "asset_ids": request.asset_ids,
+        "profile": request.profile,
+        "fps": request.fps,
+    })
+
+
+@app.get(
+    "/api/v1/export-jobs/{job_id}",
+    response_model=ExportJobResponse,
+    dependencies=[Depends(require_api_key)],
+)
+async def read_export_job(job_id: str):
+    try:
+        job_id = str(uuid.UUID(job_id))
+    except ValueError as exc:
+        raise HTTPException(404, "Export job not found.") from exc
+    job = _store().get_export_job(job_id)
+    if not job:
+        raise HTTPException(404, "Export job not found.")
+    return job
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 async def studio_home():
