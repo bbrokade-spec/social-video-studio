@@ -64,6 +64,12 @@ def assemble_video(
     fps: int = 30,
     timeout_seconds: int = 900,
     trim_ranges: Sequence[tuple[float, float | None] | None] | None = None,
+    voiceover_path: str | Path | None = None,
+    music_path: str | Path | None = None,
+    voiceover_volume: float = 1.0,
+    music_volume: float = 0.18,
+    fade_in_seconds: float = 0.5,
+    fade_out_seconds: float = 1.0,
 ) -> Path:
     """Normalize and concatenate local video clips into a silent H.264 MP4.
 
@@ -105,6 +111,14 @@ def assemble_video(
         if end is not None and (not math.isfinite(end) or end <= start):
             raise MediaError("Clip end time must be greater than its start time.")
 
+    audio_paths = [Path(item).expanduser().resolve() for item in (voiceover_path, music_path) if item is not None]
+    if any(not item.is_file() or item.stat().st_size == 0 for item in audio_paths):
+        raise MediaError("An audio source file is missing or empty.")
+    if any(not math.isfinite(value) or value < 0 or value > 2 for value in (voiceover_volume, music_volume)):
+        raise MediaError("Audio volume must be between 0 and 2.")
+    if any(not math.isfinite(value) or value < 0 or value > 10 for value in (fade_in_seconds, fade_out_seconds)):
+        raise MediaError("Audio fade durations must be between 0 and 10 seconds.")
+
     width, height = PROFILES[profile]
     command = [_executable("ffmpeg"), "-hide_banner", "-loglevel", "error", "-y"]
     for source, trim in zip(sources, normalized_trims):
@@ -115,6 +129,14 @@ def assemble_video(
             if end is not None:
                 command.extend(["-t", f"{end - start:.3f}"])
         command.extend(["-i", str(source)])
+    audio_input_indices = []
+    for audio_path, is_music in ((voiceover_path, False), (music_path, True)):
+        if audio_path is None:
+            continue
+        if is_music:
+            command.extend(["-stream_loop", "-1"])
+        audio_input_indices.append((len(sources) + len(audio_input_indices), is_music))
+        command.extend(["-i", str(Path(audio_path).expanduser().resolve())])
 
     filters = []
     labels = []
@@ -129,10 +151,19 @@ def assemble_video(
     filters.append(
         "".join(labels) + f"concat=n={len(sources)}:v=1:a=0[vout]"
     )
+    audio_labels = []
+    for audio_index, is_music in audio_input_indices:
+        label = f"a{audio_index}"
+        volume = music_volume if is_music else voiceover_volume
+        filters.append(f"[{audio_index}:a:0]aresample=48000,volume={volume:.4f},afade=t=in:st=0:d={fade_in_seconds:.3f},areverse,afade=t=in:st=0:d={fade_out_seconds:.3f},areverse[{label}]")
+        audio_labels.append(f"[{label}]")
+    if audio_labels:
+        filters.append("".join(audio_labels) + f"amix=inputs={len(audio_labels)}:duration=longest:dropout_transition=0,alimiter=limit=0.95[aout]")
+
     command.extend([
         "-filter_complex", ";".join(filters),
         "-map", "[vout]",
-        "-an",
+        *( ["-map", "[aout]", "-c:a", "aac", "-b:a", "192k", "-shortest"] if audio_labels else ["-an"] ),
         "-c:v", "libx264",
         "-preset", "veryfast",
         "-crf", "20",
