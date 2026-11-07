@@ -17,10 +17,22 @@ def _headers() -> dict[str, str]:
     return headers
 
 
-def _safe_base(url: str) -> str:
-    if not url.startswith("https://"):
-        raise HTTPException(500, "Provider URL must use HTTPS")
-    return url.rstrip("/")
+def _safe_base(url: str, expected_host: str) -> str:
+    """Validate a provider origin before attaching the Hugging Face bearer token."""
+    parsed = urlparse(url)
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname is None
+        or parsed.hostname.lower() != expected_host
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.port not in (None, 443)
+        or parsed.query
+        or parsed.fragment
+        or parsed.path not in ("", "/")
+    ):
+        raise HTTPException(500, "Provider URL is not an approved HTTPS origin")
+    return f"https://{expected_host}"
 
 
 def _validate_public_image_url(url: str) -> str:
@@ -40,7 +52,7 @@ def _validate_public_image_url(url: str) -> str:
 
 
 async def submit_zimage(payload: dict[str, Any]) -> str:
-    base = _safe_base(settings.zimage_base_url)
+    base = _safe_base(settings.zimage_base_url, "mcp-tools-z-image-turbo.hf.space")
     url = f"{base}/gradio_api/call/v2/generate"
     timeout = httpx.Timeout(connect=20.0, read=settings.http_timeout_seconds, write=30.0, pool=20.0)
     try:
@@ -61,7 +73,7 @@ async def get_zimage_events(event_id: str) -> list[dict[str, Any]]:
     if not re.fullmatch(r"[A-Za-z0-9._:-]{1,200}", event_id):
         raise HTTPException(422, "Invalid Z-Image event_id")
 
-    base = _safe_base(settings.zimage_base_url)
+    base = _safe_base(settings.zimage_base_url, "mcp-tools-z-image-turbo.hf.space")
     url = f"{base}/gradio_api/call/generate/{event_id}"
     timeout = httpx.Timeout(connect=20.0, read=settings.generation_wait_seconds, write=20.0, pool=20.0)
     collected: list[dict[str, Any]] = []
@@ -116,7 +128,7 @@ def _find_filedata(value: Any) -> list[dict[str, Any]]:
 
 
 async def generate_wan(payload: dict[str, Any]) -> dict[str, Any]:
-    base = _safe_base(settings.wan_base_url)
+    base = _safe_base(settings.wan_base_url, "zerogpu-aoti-wan2-2-fp8da-aoti-faster.hf.space")
     url = f"{base}/run/generate_video"
     timeout = httpx.Timeout(
         connect=20.0,

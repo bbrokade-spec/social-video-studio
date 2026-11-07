@@ -14,5 +14,8 @@ class Settings(BaseSettings):
     http_timeout_seconds: float = 60.0
     generation_wait_seconds: int = 240
 
+    data_dir: str = "./data"
+    max_upload_bytes: int = 524288000
+
 
 settings = Settings()
