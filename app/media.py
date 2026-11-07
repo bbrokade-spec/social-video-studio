@@ -47,7 +47,6 @@ def probe_media(path: str | Path, *, timeout_seconds: int = 20) -> dict:
     try:
         result = subprocess.run(
             command, check=True, capture_output=True, text=True, timeout=timeout_seconds,
-            cwd=str(subtitle_source.parent) if subtitle_source is not None else None,
         )
         metadata = json.loads(result.stdout)
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, json.JSONDecodeError) as exc:
@@ -220,7 +219,8 @@ def assemble_video(
 
     try:
         subprocess.run(
-            command, check=True, capture_output=True, text=True, timeout=timeout_seconds
+            command, check=True, capture_output=True, text=True, timeout=timeout_seconds,
+            cwd=str(subtitle_source.parent) if subtitle_source is not None else None,
         )
     except subprocess.TimeoutExpired as exc:
         raise MediaError("Video export exceeded its time limit.") from exc
