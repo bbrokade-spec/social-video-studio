@@ -1,4 +1,5 @@
 from urllib.parse import urljoin
+import secrets
 
 from fastapi import Depends, FastAPI, HTTPException, Security
 from fastapi.security.api_key import APIKeyHeader
@@ -39,7 +40,7 @@ def require_api_key(x_api_key: str | None = Security(api_key_header)) -> None:
         return
     if not settings.api_key:
         raise HTTPException(503, "Set API_KEY before enabling generation endpoints.")
-    if x_api_key != settings.api_key:
+    if not secrets.compare_digest(x_api_key or "", settings.api_key):
         raise HTTPException(401, "Missing or invalid API key.")
 
 
