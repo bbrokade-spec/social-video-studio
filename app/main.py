@@ -148,6 +148,30 @@ async def _run_image_to_video(image_request: ImageRequest, video_request):
 _export_worker_task: asyncio.Task | None = None
 
 
+def _resolve_audio_options(store: LocalStore, project_id: str, audio: dict | None) -> dict:
+    audio = audio or {}
+    assets = {item["id"]: item for item in store.list_assets(project_id)}
+    resolved = {}
+    for key, media_key in (("voiceover_asset_id", "voiceover_path"), ("music_asset_id", "music_path")):
+        asset_id = audio.get(key)
+        if not asset_id:
+            continue
+        asset = assets.get(asset_id)
+        if not asset or asset["media_type"] not in {"audio/mpeg", "audio/wav", "audio/mp4"}:
+            raise MediaError("A selected audio asset is missing or is not a supported audio file.")
+        stored_name = asset["stored_name"]
+        if Path(stored_name).name != stored_name:
+            raise MediaError("Stored audio metadata is invalid.")
+        source = (store.asset_dir / stored_name).resolve()
+        if source.parent != store.asset_dir.resolve() or not source.is_file():
+            raise MediaError("A selected audio file is missing.")
+        resolved[media_key] = source
+    for key in ("voiceover_volume", "music_volume", "fade_in_seconds", "fade_out_seconds"):
+        if key in audio:
+            resolved[key] = audio[key]
+    return resolved
+
+
 def _process_next_export_job() -> bool:
     store = _store()
     job = store.claim_next_export_job()
@@ -176,7 +200,8 @@ def _process_next_export_job() -> bool:
         stored_name = f"{asset_id}.mp4"
         output_path = store.asset_dir / stored_name
         trim_ranges = [(item["start_seconds"], item.get("end_seconds")) for item in job.get("clip_trims", [])] or None
-        assemble_video(selected, output_path, profile=job["profile"], fps=job["fps"], trim_ranges=trim_ranges)
+        audio_options = _resolve_audio_options(store, job["project_id"], job.get("audio"))
+        assemble_video(selected, output_path, profile=job["profile"], fps=job["fps"], trim_ranges=trim_ranges, **audio_options)
 
         digest = hashlib.sha256()
         with output_path.open("rb") as rendered:
@@ -244,11 +269,17 @@ async def create_project_export_job(project_id: str, request: ExportJobCreateReq
         if asset["media_type"] not in {"video/mp4", "video/quicktime", "video/webm"}:
             raise HTTPException(422, "Only video assets can be included in an export.")
 
+    audio_data = request.audio.model_dump(exclude_none=True) if request.audio else {}
+    try:
+        _resolve_audio_options(store, project_id, audio_data)
+    except MediaError as exc:
+        raise HTTPException(422, str(exc)) from exc
     return store.create_export_job({
         "id": str(uuid.uuid4()),
         "project_id": project_id,
         "asset_ids": request.asset_ids,
         "clip_trims": [item.model_dump() for item in request.clip_trims] if request.clip_trims else [],
+        "audio": audio_data,
         "profile": request.profile,
         "fps": request.fps,
     })
@@ -576,6 +607,7 @@ async def export_project_video(project_id: str, request: MediaExportRequest):
             profile=request.profile,
             fps=request.fps,
             trim_ranges=[(item.start_seconds, item.end_seconds) for item in request.clip_trims] if request.clip_trims else None,
+            **_resolve_audio_options(store, project_id, request.audio.model_dump(exclude_none=True) if request.audio else {}),
         )
         digest = hashlib.sha256()
         with output_path.open("rb") as rendered:
