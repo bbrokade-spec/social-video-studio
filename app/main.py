@@ -350,6 +350,11 @@ async def create_script_plan(project_id: str, request: ScriptPlanCreateRequest):
         }
         for index, scene in enumerate(request.scenes)
     ]
+    for scene in scenes:
+        if scene.get("asset_id"):
+            asset = store.get_asset(scene["asset_id"])
+            if not asset or asset["project_id"] != project_id or not asset["media_type"].startswith("image/"):
+                raise HTTPException(400, "Each scene image must be an image asset belonging to this project.")
     try:
         return store.create_script_plan({
             "id": plan_id,
@@ -405,6 +410,10 @@ async def replace_script_plan(plan_id: str, request: ScriptPlanCreateRequest):
         plan_id = str(uuid.UUID(plan_id))
     except ValueError as exc:
         raise HTTPException(404, "Script plan not found.") from exc
+    store = _store()
+    existing = store.get_script_plan(plan_id)
+    if not existing:
+        raise HTTPException(404, "Script plan not found.")
     scenes = [
         {
             "id": str(uuid.uuid4()),
@@ -413,7 +422,12 @@ async def replace_script_plan(plan_id: str, request: ScriptPlanCreateRequest):
         }
         for index, scene in enumerate(request.scenes)
     ]
-    plan = _store().update_script_plan(plan_id, {
+    for scene in scenes:
+        if scene.get("asset_id"):
+            asset = store.get_asset(scene["asset_id"])
+            if not asset or asset["project_id"] != existing["project_id"] or not asset["media_type"].startswith("image/"):
+                raise HTTPException(400, "Each scene image must be an image asset belonging to this project.")
+    plan = store.update_script_plan(plan_id, {
         "title": request.title,
         "full_script": request.full_script,
         "output_profile": request.output_profile,
