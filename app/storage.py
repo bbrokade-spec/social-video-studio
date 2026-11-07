@@ -57,6 +57,7 @@ class LocalStore:
                     id TEXT PRIMARY KEY,
                     project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
                     asset_ids_json TEXT NOT NULL,
+                    clip_trims_json TEXT NOT NULL DEFAULT '[]',
                     profile TEXT NOT NULL CHECK(profile IN ('vertical', 'landscape')),
                     fps INTEGER NOT NULL CHECK(fps BETWEEN 1 AND 60),
                     status TEXT NOT NULL CHECK(status IN ('queued', 'running', 'completed', 'failed')),
@@ -67,6 +68,9 @@ class LocalStore:
                     updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
                 )"""
             )
+            columns = {row[1] for row in db.execute("PRAGMA table_info(export_jobs)")}
+            if "clip_trims_json" not in columns:
+                db.execute("ALTER TABLE export_jobs ADD COLUMN clip_trims_json TEXT NOT NULL DEFAULT '[]'")
             db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_export_jobs_status ON export_jobs(status, created_at)"
             )
@@ -130,9 +134,9 @@ class LocalStore:
         with self._connect() as db:
             db.execute(
                 """INSERT INTO export_jobs
-                (id, project_id, asset_ids_json, profile, fps, status)
-                VALUES (?, ?, ?, ?, ?, 'queued')""",
-                (job["id"], job["project_id"], json.dumps(job["asset_ids"]), job["profile"], job["fps"]),
+                (id, project_id, asset_ids_json, clip_trims_json, profile, fps, status)
+                VALUES (?, ?, ?, ?, ?, ?, 'queued')""",
+                (job["id"], job["project_id"], json.dumps(job["asset_ids"]), json.dumps(job.get("clip_trims") or []), job["profile"], job["fps"]),
             )
             row = db.execute("SELECT * FROM export_jobs WHERE id = ?", (job["id"],)).fetchone()
         return self._job_dict(row)
@@ -144,6 +148,7 @@ class LocalStore:
             return None
         result = dict(row)
         result["asset_ids"] = json.loads(result.pop("asset_ids_json"))
+        result["clip_trims"] = json.loads(result.pop("clip_trims_json", "[]"))
         return result
 
     def get_export_job(self, job_id: str) -> dict[str, Any] | None:
