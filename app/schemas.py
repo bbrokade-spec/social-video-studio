@@ -166,6 +166,14 @@ class ScriptSceneInput(BaseModel):
     negative_prompt: str = Field(default="", max_length=2000)
     duration_seconds: float = Field(default=5.0, ge=0.5, le=30)
 
+    @field_validator("narration_text", "visual_prompt")
+    @classmethod
+    def trim_scene_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Scene narration and visual prompt cannot be blank.")
+        return value
+
 
 class ScriptPlanCreateRequest(BaseModel):
     title: str = Field(min_length=1, max_length=120)
