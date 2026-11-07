@@ -230,6 +230,26 @@ def _store() -> LocalStore:
     return LocalStore(settings.data_dir)
 
 
+def _matches_media_signature(extension: str, header: bytes) -> bool:
+    if extension in {".mp4", ".mov", ".m4a"}:
+        return len(header) >= 12 and header[4:8] == b"ftyp"
+    if extension == ".webm":
+        return header.startswith(bytes.fromhex("1A45DFA3"))
+    if extension in {".jpg", ".jpeg"}:
+        return header.startswith(bytes.fromhex("FFD8FF"))
+    if extension == ".png":
+        return header.startswith(bytes.fromhex("89504E470D0A1A0A"))
+    if extension == ".webp":
+        return len(header) >= 12 and header[:4] == b"RIFF" and header[8:12] == b"WEBP"
+    if extension == ".wav":
+        return len(header) >= 12 and header[:4] == b"RIFF" and header[8:12] == b"WAVE"
+    if extension == ".mp3":
+        return header.startswith(b"ID3") or (
+            len(header) >= 2 and header[0] == 0xFF and header[1] & 0xE0 == 0xE0
+        )
+    return False
+
+
 @app.post(
     "/api/v1/projects",
     response_model=ProjectResponse,
@@ -279,6 +299,7 @@ async def upload_project_asset(project_id: str, file: UploadFile = File(...)):
     final_path = store.asset_dir / stored_name
     digest = hashlib.sha256()
     size = 0
+    header = b""
 
     try:
         with temporary_path.open("xb") as destination:
@@ -286,6 +307,8 @@ async def upload_project_asset(project_id: str, file: UploadFile = File(...)):
                 chunk = await file.read(1024 * 1024)
                 if not chunk:
                     break
+                if not header:
+                    header = chunk[:16]
                 size += len(chunk)
                 if size > settings.max_upload_bytes:
                     raise HTTPException(413, "Upload exceeds the configured size limit.")
@@ -294,6 +317,8 @@ async def upload_project_asset(project_id: str, file: UploadFile = File(...)):
 
         if size == 0:
             raise HTTPException(400, "Uploaded file is empty.")
+        if not _matches_media_signature(extension, header):
+            raise HTTPException(415, "File content does not match its declared media type.")
 
         temporary_path.replace(final_path)
         asset = store.register_asset({
