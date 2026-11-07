@@ -38,7 +38,8 @@ def test_audio_mix_adds_voiceover_and_looped_music_inputs(tmp_path, monkeypatch)
     assert "atrim=duration=10.000" in filter_graph
     assert "volume=0.2000" in filter_graph
     assert "-c:a" in command and "aac" in command
-    assert "-shortest" in command
+    assert "-shortest" not in command
+    assert command[command.index("-t") + 1] == "10.000"
 
 
 def test_audio_mix_rejects_invalid_volume_and_fades(tmp_path, monkeypatch):
