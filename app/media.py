@@ -46,7 +46,8 @@ def probe_media(path: str | Path, *, timeout_seconds: int = 20) -> dict:
     ]
     try:
         result = subprocess.run(
-            command, check=True, capture_output=True, text=True, timeout=timeout_seconds
+            command, check=True, capture_output=True, text=True, timeout=timeout_seconds,
+            cwd=str(subtitle_source.parent) if subtitle_source is not None else None,
         )
         metadata = json.loads(result.stdout)
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, json.JSONDecodeError) as exc:
@@ -70,12 +71,15 @@ def assemble_video(
     music_volume: float = 0.18,
     fade_in_seconds: float = 0.5,
     fade_out_seconds: float = 1.0,
+    subtitles_path: str | Path | None = None,
+    subtitle_style: Literal["classic", "bold", "yellow"] = "classic",
+    subtitle_position: Literal["bottom", "center"] = "bottom",
 ) -> Path:
-    """Normalize and concatenate local video clips into a silent H.264 MP4.
+    """Normalize and concatenate local video clips into an H.264 MP4.
 
     Each clip is scaled to fit the selected canvas, padded without cropping,
     assigned square pixels and a common frame rate, then concatenated.
-    The function never downloads media or invokes a shell.
+    Optional audio and SRT subtitles are mixed/burned in locally. The function never downloads media or invokes a shell.
     """
     if profile not in PROFILES:
         raise MediaError("Unsupported export profile.")
@@ -118,6 +122,12 @@ def assemble_video(
         raise MediaError("Audio volume must be between 0 and 2.")
     if any(not math.isfinite(value) or value < 0 or value > 10 for value in (fade_in_seconds, fade_out_seconds)):
         raise MediaError("Audio fade durations must be between 0 and 10 seconds.")
+
+    subtitle_source = Path(subtitles_path).expanduser().resolve() if subtitles_path is not None else None
+    if subtitle_source is not None and (not subtitle_source.is_file() or subtitle_source.suffix.lower() != ".srt"):
+        raise MediaError("Subtitle source must be an existing SRT file.")
+    if subtitle_style not in {"classic", "bold", "yellow"} or subtitle_position not in {"bottom", "center"}:
+        raise MediaError("Unsupported subtitle style or position.")
 
     width, height = PROFILES[profile]
     command = [_executable("ffmpeg"), "-hide_banner", "-loglevel", "error", "-y"]
@@ -165,9 +175,21 @@ def assemble_video(
             f"format=yuv420p[{label}]"
         )
         labels.append(f"[{label}]")
+    video_output_label = "vconcat"
     filters.append(
-        "".join(labels) + f"concat=n={len(sources)}:v=1:a=0[vout]"
+        "".join(labels) + f"concat=n={len(sources)}:v=1:a=0[{video_output_label}]"
     )
+    if subtitle_source is not None:
+        style_map = {
+            "classic": "FontName=Arial,FontSize=32,PrimaryColour=&H00FFFFFF,Outline=2,Shadow=1",
+            "bold": "FontName=Arial,FontSize=36,Bold=1,PrimaryColour=&H00FFFFFF,Outline=3,Shadow=1",
+            "yellow": "FontName=Arial,FontSize=34,Bold=1,PrimaryColour=&H0000FFFF,Outline=3,Shadow=1",
+        }
+        alignment = 5 if subtitle_position == "center" else 2
+        subtitle_filter = f"subtitles=filename='{subtitle_source.name}':force_style='{style_map[subtitle_style]},Alignment={alignment},MarginV=48'"
+        filters.append(f"[{video_output_label}]{subtitle_filter}[vout]")
+    else:
+        filters.append(f"[{video_output_label}]null[vout]")
     audio_labels = []
     for audio_index, is_music in audio_input_indices:
         label = f"a{audio_index}"
