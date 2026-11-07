@@ -94,3 +94,21 @@ class MediaExportRequest(BaseModel):
     asset_ids: list[str] = Field(min_length=1, max_length=50)
     profile: Literal["vertical", "landscape"] = "vertical"
     fps: int = Field(default=30, ge=1, le=60)
+
+
+class ExportJobCreateRequest(MediaExportRequest):
+    pass
+
+
+class ExportJobResponse(BaseModel):
+    id: str
+    project_id: str
+    asset_ids: list[str]
+    profile: Literal["vertical", "landscape"]
+    fps: int
+    status: Literal["queued", "running", "completed", "failed"]
+    progress: int
+    result_asset_id: str | None = None
+    error_message: str | None = None
+    created_at: str
+    updated_at: str
