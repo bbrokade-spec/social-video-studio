@@ -175,7 +175,8 @@ def _process_next_export_job() -> bool:
         asset_id = str(uuid.uuid4())
         stored_name = f"{asset_id}.mp4"
         output_path = store.asset_dir / stored_name
-        assemble_video(selected, output_path, profile=job["profile"], fps=job["fps"])
+        trim_ranges = [(item["start_seconds"], item.get("end_seconds")) for item in job.get("clip_trims", [])] or None
+        assemble_video(selected, output_path, profile=job["profile"], fps=job["fps"], trim_ranges=trim_ranges)
 
         digest = hashlib.sha256()
         with output_path.open("rb") as rendered:
@@ -247,6 +248,7 @@ async def create_project_export_job(project_id: str, request: ExportJobCreateReq
         "id": str(uuid.uuid4()),
         "project_id": project_id,
         "asset_ids": request.asset_ids,
+        "clip_trims": [item.model_dump() for item in request.clip_trims] if request.clip_trims else [],
         "profile": request.profile,
         "fps": request.fps,
     })
@@ -573,6 +575,7 @@ async def export_project_video(project_id: str, request: MediaExportRequest):
             output_path,
             profile=request.profile,
             fps=request.fps,
+            trim_ranges=[(item.start_seconds, item.end_seconds) for item in request.clip_trims] if request.clip_trims else None,
         )
         digest = hashlib.sha256()
         with output_path.open("rb") as rendered:
