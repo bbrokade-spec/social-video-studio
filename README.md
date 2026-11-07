@@ -2,18 +2,14 @@
 
 A self-hostable orchestration backend for FINOMICS video production.
 
-## Current scope
+## What is in this repository
 
-This initial foundation provides:
-- FastAPI service and health/configuration endpoints.
-- Hugging Face Gradio Space adapters for Z-Image-Turbo and Wan 2.2.
-- Asynchronous job submission and event-stream/result retrieval.
-- Server-side Hugging Face token handling.
-- No automatic GPU calls at startup or health-check time.
-
-## Important deployment note
-
-ChatGPT Go cannot be assumed to invoke an arbitrary custom backend directly. This service is designed to expose a documented HTTP API. A ChatGPT-compatible connector or supported tool integration is a separate deployment step.
+- FastAPI backend with health and provider metadata endpoints.
+- Z-Image-Turbo adapter using Gradio's asynchronous event-ID/SSE flow.
+- Wan 2.2 adapter using the Space's documented `POST /run/generate_video` JSON endpoint and FileData response.
+- Server-side Hugging Face token configuration.
+- API-key protection for generation routes, disabled by default until an API key is configured.
+- Tests for health and safe default behavior.
 
 ## Quick start
 
@@ -24,36 +20,52 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
+```
+
+Set `API_KEY` and `HF_TOKEN` in `.env`, then run:
+
+```bash
 uvicorn app.main:app --reload
 ```
 
 Open http://127.0.0.1:8000/docs.
 
-Set `HF_TOKEN` in `.env` or deployment secrets. Never commit a real token.
+Never commit a real Hugging Face token or API key.
 
-## Configuration
+## API endpoints
 
-See `.env.example`. The default Space URLs are the public Spaces established during the pilot. Generation endpoints can change; verify against each Space's current `/gradio_api/openapi.json`.
+All generation endpoints require the `X-API-Key` header. The health and provider endpoints do not.
 
-## API
-
-- `GET /health`: local service health only. Does not call Hugging Face.
+- `GET /health`: local service health. Does not call Hugging Face.
 - `GET /api/v1/providers`: configured provider metadata.
-- `POST /api/v1/images`: submit Z-Image-Turbo generation.
-- `GET /api/v1/images/{event_id}`: wait for and retrieve image output.
-- `POST /api/v1/videos`: submit Wan 2.2 generation.
-- `GET /api/v1/videos/{event_id}`: wait for and retrieve video output.
+- `POST /api/v1/images`: submit a Z-Image-Turbo generation job. Returns an `event_id`.
+- `GET /api/v1/images/{event_id}`: waits for the Z-Image SSE completion and returns the FileData outputs.
+- `POST /api/v1/videos`: submits a Wan 2.2 request and returns its FileData output when completed.
 
-The image and video endpoints are documented in OpenAPI at `/docs`.
+FastAPI serves the machine-readable schema at `/openapi.json` and interactive docs at `/docs`.
 
-## Current limitations
+## Provider contract
 
-- Hugging Face ZeroGPU availability and quota are external dependencies. A successful request is not guaranteed.
-- This first iteration is an API adapter, not a hosted production service.
-- Asset URLs returned by Gradio may be temporary. Download and persist assets promptly in a production deployment.
-- No narration, editing, subtitles, music or MP4 assembly is implemented yet.
-- Do not expose this API publicly without HTTPS, authentication, rate limiting and request controls.
+The provider endpoint paths and payload structures were transcribed from the live OpenAPI specifications supplied by the project owner. See [docs/API-CONTRACT.md](docs/API-CONTRACT.md). Revalidate them if either Space is updated.
+
+## Deployment
+
+This repository contains a Dockerfile. A hosting service must provide:
+- HTTPS
+- persistent environment secrets
+- adequate request timeout for GPU generation
+- request authentication and rate limits
+- optional object storage to persist temporary Gradio files
+
+The service is not deployed by committing this code. Do not expose it publicly until it is deployed behind HTTPS and configured with a strong API key.
+
+## Important limitations
+
+- Hugging Face ZeroGPU capacity and user quota are external and variable.
+- Gradio output URLs may be temporary. Production deployment should download and persist generated files promptly.
+- The first version only connects image and video generation. Voiceover, subtitles, music, editing and final MP4 assembly remain future modules.
+- ChatGPT Go's ability to directly invoke this backend is a separate integration constraint. A hosted API alone does not create a callable ChatGPT tool.
 
 ## Security
 
-Use a dedicated Hugging Face read token on the server. Never paste tokens into source files, issues, prompts or chat. Rotate a token if it is exposed.
+Keep `HF_TOKEN` and `API_KEY` in hosting secrets, not source control. Use the minimum Hugging Face token scopes needed. Revoke and replace any credential that is exposed.
