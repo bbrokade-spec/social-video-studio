@@ -59,3 +59,24 @@ class ImageToVideoPipelineResponse(BaseModel):
     image_event_id: str
     image: dict[str, Any]
     video: dict[str, Any]
+
+
+class ProjectCreateRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
+
+
+class ProjectResponse(BaseModel):
+    id: str
+    title: str
+    created_at: str
+    updated_at: str
+
+
+class AssetResponse(BaseModel):
+    id: str
+    project_id: str
+    original_name: str
+    media_type: str
+    size_bytes: int
+    sha256: str
+    created_at: str
