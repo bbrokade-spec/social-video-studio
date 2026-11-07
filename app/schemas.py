@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, HttpUrl, field_validator
+from pydantic import BaseModel, Field, HttpUrl, field_validator, model_validator
 
 
 class ImageRequest(BaseModel):
@@ -90,10 +90,32 @@ class AssetResponse(BaseModel):
     created_at: str
 
 
+class ClipTrim(BaseModel):
+    asset_id: str
+    start_seconds: float = Field(default=0, ge=0, le=86400)
+    end_seconds: float | None = Field(default=None, gt=0, le=86400)
+
+    @model_validator(mode="after")
+    def validate_range(self):
+        if self.end_seconds is not None and self.end_seconds <= self.start_seconds:
+            raise ValueError("Clip end time must be greater than its start time.")
+        return self
+
+
 class MediaExportRequest(BaseModel):
     asset_ids: list[str] = Field(min_length=1, max_length=50)
     profile: Literal["vertical", "landscape"] = "vertical"
     fps: int = Field(default=30, ge=1, le=60)
+    clip_trims: list[ClipTrim] | None = None
+
+    @model_validator(mode="after")
+    def validate_clip_trims(self):
+        if self.clip_trims is not None:
+            if len(self.clip_trims) != len(self.asset_ids):
+                raise ValueError("Provide one trim setting for each selected clip.")
+            if [item.asset_id for item in self.clip_trims] != self.asset_ids:
+                raise ValueError("Clip trim settings must follow the selected clip order.")
+        return self
 
 
 class ExportJobCreateRequest(MediaExportRequest):
