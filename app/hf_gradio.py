@@ -115,8 +115,11 @@ async def get_zimage_events(event_id: str) -> list[dict[str, Any]]:
 def _find_filedata(value: Any) -> list[dict[str, Any]]:
     found: list[dict[str, Any]] = []
     if isinstance(value, dict):
-        if any(key in value for key in ("url", "path")) and (
-            "orig_name" in value or "mime_type" in value or "size" in value or "path" in value
+        # The live Z-Image API guarantees a URL in its first output object;
+        # metadata fields such as orig_name and mime_type are optional.
+        if isinstance(value.get("url"), str) or (
+            isinstance(value.get("path"), str)
+            and any(key in value for key in ("orig_name", "mime_type", "size"))
         ):
             found.append(value)
         for child in value.values():

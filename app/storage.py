@@ -83,6 +83,38 @@ class LocalStore:
             db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_export_jobs_status ON export_jobs(status, created_at)"
             )
+            db.execute(
+                """CREATE TABLE IF NOT EXISTS script_plans (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                    title TEXT NOT NULL,
+                    full_script TEXT NOT NULL,
+                    output_profile TEXT NOT NULL CHECK(output_profile IN ('vertical', 'landscape')),
+                    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+                    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+                )"""
+            )
+            db.execute(
+                """CREATE TABLE IF NOT EXISTS script_scenes (
+                    id TEXT PRIMARY KEY,
+                    plan_id TEXT NOT NULL REFERENCES script_plans(id) ON DELETE CASCADE,
+                    position INTEGER NOT NULL CHECK(position >= 0),
+                    narration_text TEXT NOT NULL,
+                    visual_prompt TEXT NOT NULL,
+                    negative_prompt TEXT NOT NULL DEFAULT '',
+                    duration_seconds REAL NOT NULL CHECK(duration_seconds BETWEEN 0.5 AND 30),
+                    asset_id TEXT REFERENCES assets(id) ON DELETE SET NULL,
+                    generation_status TEXT NOT NULL DEFAULT 'not_started',
+                    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+                    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+                    UNIQUE(plan_id, position)
+                )"""
+            )
+            db.execute("CREATE INDEX IF NOT EXISTS idx_script_plans_project ON script_plans(project_id, updated_at)")
+            scene_columns = {row[1] for row in db.execute("PRAGMA table_info(script_scenes)")}
+            if "asset_id" not in scene_columns:
+                db.execute("ALTER TABLE script_scenes ADD COLUMN asset_id TEXT REFERENCES assets(id) ON DELETE SET NULL")
+            db.execute("CREATE INDEX IF NOT EXISTS idx_script_scenes_plan ON script_scenes(plan_id, position)")
 
 
     def create_project(self, project_id: str, title: str) -> dict[str, Any]:
@@ -205,3 +237,66 @@ class LocalStore:
                 WHERE id = ?""",
                 (status, progress, result_asset_id, error_message, job_id),
             )
+
+
+    def create_script_plan(self, plan: dict[str, Any]) -> dict[str, Any]:
+        import json
+        with self._connect() as db:
+            if not db.execute("SELECT 1 FROM projects WHERE id = ?", (plan["project_id"],)).fetchone():
+                raise StorageError("Project does not exist.")
+            db.execute(
+                "INSERT INTO script_plans (id, project_id, title, full_script, output_profile) VALUES (?, ?, ?, ?, ?)",
+                (plan["id"], plan["project_id"], plan["title"], plan["full_script"], plan["output_profile"]),
+            )
+            for scene in plan["scenes"]:
+                db.execute(
+                    """INSERT INTO script_scenes
+                    (id, plan_id, position, narration_text, visual_prompt, negative_prompt, duration_seconds, asset_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (scene["id"], plan["id"], scene["position"], scene["narration_text"],
+                     scene["visual_prompt"], scene.get("negative_prompt", ""), scene["duration_seconds"], scene.get("asset_id")),
+                )
+            db.execute("UPDATE projects SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?", (plan["project_id"],))
+        return self.get_script_plan(plan["id"])
+
+    def list_script_plans(self, project_id: str) -> list[dict[str, Any]]:
+        with self._connect() as db:
+            rows = db.execute("SELECT * FROM script_plans WHERE project_id = ? ORDER BY updated_at DESC", (project_id,)).fetchall()
+        return [self.get_script_plan(row["id"]) for row in rows]
+
+    def get_script_plan(self, plan_id: str) -> dict[str, Any] | None:
+        with self._connect() as db:
+            row = db.execute("SELECT * FROM script_plans WHERE id = ?", (plan_id,)).fetchone()
+            if row is None:
+                return None
+            plan = dict(row)
+            scenes = db.execute("SELECT * FROM script_scenes WHERE plan_id = ? ORDER BY position", (plan_id,)).fetchall()
+        plan["scenes"] = [dict(scene) for scene in scenes]
+        return plan
+
+    def update_script_plan(self, plan_id: str, plan: dict[str, Any]) -> dict[str, Any] | None:
+        with self._connect() as db:
+            existing = db.execute("SELECT project_id FROM script_plans WHERE id = ?", (plan_id,)).fetchone()
+            if existing is None:
+                return None
+            db.execute(
+                """UPDATE script_plans SET title = ?, full_script = ?, output_profile = ?,
+                updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?""",
+                (plan["title"], plan["full_script"], plan["output_profile"], plan_id),
+            )
+            db.execute("DELETE FROM script_scenes WHERE plan_id = ?", (plan_id,))
+            for scene in plan["scenes"]:
+                db.execute(
+                    """INSERT INTO script_scenes
+                    (id, plan_id, position, narration_text, visual_prompt, negative_prompt, duration_seconds, asset_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (scene["id"], plan_id, scene["position"], scene["narration_text"],
+                     scene["visual_prompt"], scene.get("negative_prompt", ""), scene["duration_seconds"], scene.get("asset_id")),
+                )
+            db.execute("UPDATE projects SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?", (existing["project_id"],))
+        return self.get_script_plan(plan_id)
+
+    def delete_script_plan(self, plan_id: str) -> bool:
+        with self._connect() as db:
+            cursor = db.execute("DELETE FROM script_plans WHERE id = ?", (plan_id,))
+        return cursor.rowcount > 0
