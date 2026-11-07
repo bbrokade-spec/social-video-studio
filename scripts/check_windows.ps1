@@ -38,7 +38,7 @@ if (-not (Test-Path ".env")) {
 if ($Problems.Count -gt 0) {
     Write-Host "`nPreflight failed:" -ForegroundColor Red
     $Problems | ForEach-Object { Write-Host " - $_" -ForegroundColor Red }
-    exit 1
+    throw "Windows preflight failed. Resolve the listed issues and run the check again."
 }
 
 Write-Host "`nPreflight passed. You can start the local server." -ForegroundColor Green
