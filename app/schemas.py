@@ -111,12 +111,19 @@ class AudioMixSettings(BaseModel):
     fade_out_seconds: float = Field(default=1.0, ge=0, le=10)
 
 
+class SubtitleSettings(BaseModel):
+    asset_id: str
+    style: Literal["classic", "bold", "yellow"] = "classic"
+    position: Literal["bottom", "center"] = "bottom"
+
+
 class MediaExportRequest(BaseModel):
     asset_ids: list[str] = Field(min_length=1, max_length=50)
     profile: Literal["vertical", "landscape"] = "vertical"
     fps: int = Field(default=30, ge=1, le=60)
     clip_trims: list[ClipTrim] | None = None
     audio: AudioMixSettings | None = None
+    subtitles: SubtitleSettings | None = None
 
     @model_validator(mode="after")
     def validate_clip_trims(self):
