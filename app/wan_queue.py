@@ -150,3 +150,32 @@ async def generate_wan_from_local_image(
     if not video_file:
         raise HTTPException(502, "Wan completed but did not return a downloadable video URL.")
     return {"file": video_file, "events": events, "url": urljoin(base + "/", video_file["url"])}
+
+
+async def download_wan_video(url: str, *, max_bytes: int) -> bytes:
+    """Download only a result hosted by the configured Wan Space."""
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or parsed.hostname != _ALLOWED_HOST or parsed.username or parsed.password:
+        raise HTTPException(502, "Wan returned a video URL outside the approved provider host.")
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=20, read=120, write=20, pool=20),
+            follow_redirects=False,
+        ) as client:
+            async with client.stream("GET", url) as response:
+                response.raise_for_status()
+                chunks: list[bytes] = []
+                total = 0
+                async for chunk in response.aiter_bytes():
+                    total += len(chunk)
+                    if total > max_bytes:
+                        raise HTTPException(413, "Generated video exceeds the configured upload size limit.")
+                    chunks.append(chunk)
+                data = b"".join(chunks)
+    except HTTPException:
+        raise
+    except httpx.HTTPError as exc:
+        raise HTTPException(502, f"Could not download the generated Wan video: {type(exc).__name__}") from exc
+    if len(data) < 12 or not data[4:8] == b"ftyp":
+        raise HTTPException(502, "Wan returned a file that is not a valid MP4 video.")
+    return data
