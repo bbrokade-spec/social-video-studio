@@ -131,3 +131,16 @@ The assistant can continue repository research, code review, architecture, docum
 ## Definition of done
 
 The project is not complete merely when the API returns a provider URL. Completion requires a reproducible local Windows setup, working UI, reliable job tracking, persistent assets, editable project history, narration/subtitles/audio, deterministic MP4 exports in 9:16 and 16:9, tests, security checks, and user acceptance on the owner's laptop. External generative-video availability must be labelled as quota-dependent rather than guaranteed.
+
+
+## Upstream references checked on 2026-11-07
+
+- FFmpeg licensing: https://ffmpeg.org/legal.html and https://github.com/FFmpeg/FFmpeg/blob/master/LICENSE.md
+- HyperFrames repository and licence: https://github.com/heygen-com/hyperframes
+- HyperFrames rendering engine requirements: https://github.com/heygen-com/hyperframes/tree/main/packages/engine
+- OpenChatCut repository and AGPL-3.0 licence: https://github.com/0xsline/OpenChatCut
+- Faster-Whisper repository, MIT licence, and CPU INT8 guidance: https://github.com/SYSTRAN/faster-whisper
+- ChatGPT custom MCP availability and plan restrictions: https://help.openai.com/en/articles/12584461-connecting-custom-mcp-servers-in-chatgpt
+- ChatGPT Apps SDK overview: https://help.openai.com/en/articles/12515353-building-with-the-apps-sdk
+
+These references establish the upstream claims above, not a legal opinion or a guarantee that future releases retain the same terms. Recheck the exact release, bundled dependencies, and model/voice licences before redistribution.
