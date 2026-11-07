@@ -1,5 +1,6 @@
 from urllib.parse import urljoin
 import asyncio
+from contextlib import asynccontextmanager
 import hashlib
 import secrets
 import uuid
@@ -36,10 +37,31 @@ from .schemas import (
     ExportJobResponse,
 )
 
+_export_worker_task: asyncio.Task | None = None
+
+
+@asynccontextmanager
+async def app_lifespan(application: FastAPI):
+    global _export_worker_task
+    _store().recover_interrupted_jobs()
+    _export_worker_task = asyncio.create_task(_export_worker_loop())
+    try:
+        yield
+    finally:
+        if _export_worker_task is not None:
+            _export_worker_task.cancel()
+            try:
+                await _export_worker_task
+            except asyncio.CancelledError:
+                pass
+            _export_worker_task = None
+
+
 app = FastAPI(
     title="Social Video Studio API",
     version="0.3.0",
     description="Orchestration API for FINOMICS image and video generation.",
+    lifespan=app_lifespan,
 )
 
 api_key_header = APIKeyHeader(
@@ -193,26 +215,6 @@ async def _export_worker_loop() -> None:
         worked = await run_in_threadpool(_process_next_export_job)
         if not worked:
             await asyncio.sleep(1.0)
-
-
-@app.on_event("startup")
-async def start_export_worker() -> None:
-    global _export_worker_task
-    _store().recover_interrupted_jobs()
-    if _export_worker_task is None or _export_worker_task.done():
-        _export_worker_task = asyncio.create_task(_export_worker_loop())
-
-
-@app.on_event("shutdown")
-async def stop_export_worker() -> None:
-    global _export_worker_task
-    if _export_worker_task is not None:
-        _export_worker_task.cancel()
-        try:
-            await _export_worker_task
-        except asyncio.CancelledError:
-            pass
-        _export_worker_task = None
 
 
 @app.post(
