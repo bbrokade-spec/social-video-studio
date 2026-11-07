@@ -95,11 +95,26 @@ function renderScriptStudio(host) {
   const addScene=(scene={})=>{
     const index=sceneCount++;
     const card=document.createElement("div");card.style.cssText="border:1px solid #2b3a4e;border-radius:10px;padding:14px;margin:10px 0;background:#0d1520";
-    card.innerHTML='<div class="toolbar"><strong>Scene '+(index+1)+'</strong><button type="button" class="secondary removeScene">Remove</button></div><label>Narration for this scene</label><textarea class="narration" rows="2" maxlength="5000" style="width:100%;border:1px solid #34445b;background:#0b121c;color:#edf4ff;border-radius:9px;padding:10px;font:inherit;resize:vertical"></textarea><label>Visual prompt for AI image generation</label><textarea class="visual" rows="3" maxlength="6000" style="width:100%;border:1px solid #34445b;background:#0b121c;color:#edf4ff;border-radius:9px;padding:10px;font:inherit;resize:vertical"></textarea><label>Negative prompt (optional)</label><input class="negative" maxlength="2000" placeholder="e.g. blurry, text, watermark"><label>Target duration (seconds)</label><input class="duration" type="number" min="0.5" max="30" step="0.5" value="5"><div class="actions"><button type="button" class="primary generateSceneImage">Generate image for this scene</button></div><div class="status sceneImageStatus">Image not generated yet.</div><img class="sceneImagePreview" alt="Generated scene preview" style="display:none;width:100%;max-height:420px;object-fit:contain;border:1px solid #34445b;border-radius:9px;margin-top:10px;background:#080d14">';
+    card.innerHTML='<div class="toolbar"><strong>Scene '+(index+1)+'</strong><button type="button" class="secondary removeScene">Remove</button></div><label>Narration for this scene</label><textarea class="narration" rows="2" maxlength="5000" style="width:100%;border:1px solid #34445b;background:#0b121c;color:#edf4ff;border-radius:9px;padding:10px;font:inherit;resize:vertical"></textarea><label>Visual prompt for AI image generation</label><textarea class="visual" rows="3" maxlength="6000" style="width:100%;border:1px solid #34445b;background:#0b121c;color:#edf4ff;border-radius:9px;padding:10px;font:inherit;resize:vertical"></textarea><label>Negative prompt (optional)</label><input class="negative" maxlength="2000" placeholder="e.g. blurry, text, watermark"><label>Target duration (seconds)</label><input class="duration" type="number" min="0.5" max="30" step="0.5" value="5"><div class="actions"><button type="button" class="primary generateSceneImage">Generate image for this scene</button></div><div class="status sceneImageStatus">Image not generated yet.</div><img class="sceneImagePreview" alt="Scene image preview" style="display:none;width:100%;max-height:420px;object-fit:contain;border:1px solid #34445b;border-radius:9px;margin-top:10px;background:#080d14"><label>Or import an image generated with ChatGPT</label><input class="chatgptImageFile" type="file" accept="image/png,image/jpeg,image/webp"><div class="status chatgptImageStatus">Choose a ChatGPT-generated image saved on your computer to add it to this project's media library.</div>';
     card.querySelector(".narration").value=scene.narration_text||"";
     card.querySelector(".visual").value=scene.visual_prompt||"";
     card.querySelector(".negative").value=scene.negative_prompt||"";
     card.querySelector(".duration").value=scene.duration_seconds??5;
+    card.querySelector(".chatgptImageFile").onchange=async(event)=>{
+      const file=event.target.files?.[0];if(!file)return;
+      const message=card.querySelector(".chatgptImageStatus"),preview=card.querySelector(".sceneImagePreview");
+      if(!["image/png","image/jpeg","image/webp"].includes(file.type)){message.textContent="Choose a PNG, JPEG or WebP image.";message.className="status error";event.target.value="";return;}
+      message.textContent="Uploading ChatGPT image to this project...";message.className="status";
+      try{
+        const form=new FormData();form.append("file",file);
+        const asset=await request("/api/v1/projects/"+activeProject.id+"/assets",{method:"POST",body:form});
+        const reader=new FileReader();
+        reader.onload=()=>{preview.src=reader.result;preview.style.display="block";message.textContent="Imported from ChatGPT and saved to project media: "+asset.original_name+". Refresh project assets to see it in the media list.";};
+        reader.onerror=()=>{message.textContent="Image was saved, but the local preview could not be displayed.";message.className="status error";};
+        reader.readAsDataURL(file);
+      }catch(error){message.textContent=error.message||"Could not import this image.";message.className="status error";}
+      finally{event.target.value="";}
+    };
     card.querySelector(".generateSceneImage").onclick=async()=>{
       const button=card.querySelector(".generateSceneImage"),message=card.querySelector(".sceneImageStatus"),preview=card.querySelector(".sceneImagePreview");
       const prompt=card.querySelector(".visual").value.trim(),negative_prompt=card.querySelector(".negative").value.trim();
