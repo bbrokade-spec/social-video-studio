@@ -5,10 +5,13 @@ import uuid
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, HTTPException, Security, UploadFile
+from fastapi.responses import FileResponse
+from starlette.concurrency import run_in_threadpool
 from fastapi.security.api_key import APIKeyHeader
 
 from .config import settings
 from .storage import LocalStore, StorageError
+from .media import MediaError, assemble_video
 from .hf_gradio import (
     _find_filedata,
     _validate_public_image_url,
@@ -27,6 +30,7 @@ from .schemas import (
     ProjectCreateRequest,
     ProjectResponse,
     AssetResponse,
+    MediaExportRequest,
 )
 
 app = FastAPI(
@@ -366,3 +370,101 @@ async def list_project_assets(project_id: str):
         )}
         for asset in store.list_assets(project_id)
     ]
+
+
+@app.post(
+    "/api/v1/projects/{project_id}/exports",
+    response_model=AssetResponse,
+    dependencies=[Depends(require_api_key)],
+)
+async def export_project_video(project_id: str, request: MediaExportRequest):
+    try:
+        project_id = str(uuid.UUID(project_id))
+    except ValueError as exc:
+        raise HTTPException(404, "Project not found.") from exc
+
+    store = _store()
+    if not store.get_project(project_id):
+        raise HTTPException(404, "Project not found.")
+
+    project_assets = {item["id"]: item for item in store.list_assets(project_id)}
+    if len(set(request.asset_ids)) != len(request.asset_ids):
+        raise HTTPException(422, "Duplicate asset IDs are not allowed.")
+
+    selected = []
+    for asset_id in request.asset_ids:
+        asset = project_assets.get(asset_id)
+        if not asset:
+            raise HTTPException(404, "One or more project assets were not found.")
+        if asset["media_type"] != "video/mp4" and not (
+            asset["media_type"] in {"video/quicktime", "video/webm"}
+        ):
+            raise HTTPException(422, "Only video assets can be included in an export.")
+        stored_name = asset["stored_name"]
+        if Path(stored_name).name != stored_name:
+            raise HTTPException(500, "Stored asset metadata is invalid.")
+        source = (store.asset_dir / stored_name).resolve()
+        if source.parent != store.asset_dir.resolve() or not source.is_file():
+            raise HTTPException(404, "A project media file is missing.")
+        selected.append(source)
+
+    asset_id = str(uuid.uuid4())
+    stored_name = f"{asset_id}.mp4"
+    output_path = store.asset_dir / stored_name
+    try:
+        await run_in_threadpool(
+            assemble_video,
+            selected,
+            output_path,
+            profile=request.profile,
+            fps=request.fps,
+        )
+        digest = hashlib.sha256()
+        with output_path.open("rb") as rendered:
+            for chunk in iter(lambda: rendered.read(1024 * 1024), b""):
+                digest.update(chunk)
+        asset = store.register_asset({
+            "id": asset_id,
+            "project_id": project_id,
+            "original_name": f"export-{request.profile}.mp4",
+            "stored_name": stored_name,
+            "media_type": "video/mp4",
+            "size_bytes": output_path.stat().st_size,
+            "sha256": digest.hexdigest(),
+        })
+        return {key: asset[key] for key in (
+            "id", "project_id", "original_name", "media_type",
+            "size_bytes", "sha256", "created_at"
+        )}
+    except MediaError as exc:
+        output_path.unlink(missing_ok=True)
+        raise HTTPException(422, str(exc)) from exc
+    except (OSError, StorageError) as exc:
+        output_path.unlink(missing_ok=True)
+        raise HTTPException(500, "Could not save the exported video.") from exc
+
+
+@app.get(
+    "/api/v1/assets/{asset_id}/download",
+    dependencies=[Depends(require_api_key)],
+)
+async def download_project_asset(asset_id: str):
+    try:
+        asset_id = str(uuid.UUID(asset_id))
+    except ValueError as exc:
+        raise HTTPException(404, "Asset not found.") from exc
+    store = _store()
+    asset = store.get_asset(asset_id)
+    if not asset:
+        raise HTTPException(404, "Asset not found.")
+    stored_name = asset["stored_name"]
+    if Path(stored_name).name != stored_name:
+        raise HTTPException(500, "Stored asset metadata is invalid.")
+    source = (store.asset_dir / stored_name).resolve()
+    if source.parent != store.asset_dir.resolve() or not source.is_file():
+        raise HTTPException(404, "Asset file not found.")
+    return FileResponse(
+        source,
+        media_type=asset["media_type"],
+        filename=asset["original_name"],
+    )
