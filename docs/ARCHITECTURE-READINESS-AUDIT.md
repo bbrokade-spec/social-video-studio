@@ -51,19 +51,20 @@ The correct next step is to harden the existing backend and add a local-first pr
 3. Job execution: start with a simple local worker and SQLite-backed job queue; introduce Redis/Celery only if measured workload requires it.
 4. Database: SQLite for single-user local mode; PostgreSQL only for multi-user hosted deployment.
 5. Media pipeline: FFmpeg for deterministic assembly, audio mixing, subtitle burn-in/sidecar, crop/reframe, thumbnails, and MP4 export.
-6. Motion graphics: HyperFrames or HTML/CSS-to-video rendering for charts, titles, explainers, and branded scenes.
-7. Editing integration: evaluate OpenChatCut as an optional external editor/MCP integration, not as a hard runtime dependency until Windows installation and interoperability are tested.
+6. Motion graphics: HyperFrames (Apache-2.0) is the preferred candidate for charts, titles, explainers, and branded scenes, pending a Windows performance test.
+7. Editing integration: OpenChatCut is an optional external editor only, subject to its AGPL-3.0 terms and Windows interoperability tests. Do not bundle it into the first release.
 8. AI providers: keep Z-Image and Wan adapters optional and clearly label external quota, availability, privacy, and latency. Add no paid provider by default.
 9. Speech: evaluate Faster-Whisper for local transcription and Piper/Kokoro for local TTS after testing language quality, model licences, CPU speed, and RAM.
 10. Local LLM: Ollama remains optional. Use ChatGPT for planning and writing during development; install a local LLM only if offline inference or local agent orchestration becomes a demonstrated requirement.
 
-## Open-source component shortlist and licence review required
+## Open-source component decisions from current upstream review
 
-- FFmpeg: core media processing; review LGPL/GPL build configuration and codec licensing for distribution.
-- HyperFrames: programmatic HTML/CSS-based video rendering; validate current repository health and licence before adoption.
-- OpenChatCut: promising timeline editor and agent integration; inspect maturity, release packaging, security model, and AGPL obligations before embedding or distributing.
-- Faster-Whisper: transcription; validate model downloads, CPU performance, and model/data terms.
-- Piper / Kokoro: local TTS candidates; check the exact repository and voice/model licences independently.
+- **FFmpeg: adopt as the media engine.** Most of FFmpeg is LGPL 2.1+, while optional GPL components change the applicable licence. Select and document a known build configuration, codec set, and redistribution obligations before packaging. Do not assume every downloadable Windows build has the same licence profile.
+- **HyperFrames: preferred rendering candidate for authored motion graphics.** Its upstream project is Apache-2.0 and renders deterministic frame-based video from HTML/CSS/JavaScript using Chromium and FFmpeg. It is a better fit for FINOMICS charts, title sequences, explainers, and repeatable templates than a full AI-video model. Keep it as a separate rendering adapter until Node.js/Chromium/FFmpeg installation and laptop performance are tested.
+- **OpenChatCut: optional external editor only.** The public repository is AGPL-3.0. Its local-first timeline and agent/MCP direction are attractive, but the licence and independent release lifecycle make it unsuitable as an embedded dependency in the first release. Evaluate it as a separately installed editor and test export/import interoperability.
+- **Faster-Whisper: optional local transcription adapter.** The project is MIT-licensed and documents CPU INT8 operation. Benchmark a small model on the actual VivoBook before enabling it by default. Model assets and any third-party data remain separately reviewable.
+- **Kokoro / Piper: defer TTS selection.** Model weights, voice packs, inference code, and packaged runtimes can have different terms. The inspected Kokoro runtime distributions include copyleft dependencies, so choose a specific minimal runtime and voice only after a component-level licence audit.
+- **Docling and workflow automation tools:** keep outside the video-studio dependency graph. They belong to separate future workbenches unless a concrete feature requires them.
 - Docling: valuable for a separate future document-intelligence workbench, not a dependency of the video studio.
 - Activepieces / Flowise: optional workflow orchestration candidates; do not add both without a concrete use case.
 
@@ -108,6 +109,10 @@ No third-party repository should be copied into this project until its current l
 - Automated tests on clean Windows environment.
 - Security review, backup/restore, logs, error handling, and user documentation.
 - User acceptance test on the VivoBook before any public deployment.
+
+## ChatGPT control and integration constraint
+
+The product should expose a clean, documented API and an optional MCP adapter, but it must not depend on ChatGPT being able to connect to that adapter. Current OpenAI documentation states that full custom MCP connections with write/modify actions are available to Business and Enterprise/Edu workspaces, not personal Go accounts. Pro supports custom MCP connections with read/fetch permissions, not full write actions. Therefore, the current Go account cannot be promised direct ChatGPT control of generation, editing, or export through a custom MCP server. Build the studio so it is fully usable through its own local web UI and API first; revisit ChatGPT write-control only if the account/workspace capability changes. Do not purchase an upgrade solely on an assumption that it will unlock the exact workflow without checking the current plan rules.
 
 ## Explicit hardware decision
 
