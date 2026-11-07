@@ -16,6 +16,7 @@ def test_audio_mix_adds_voiceover_and_looped_music_inputs(tmp_path, monkeypatch)
     for path in (clip, voice, music):
         path.write_bytes(b"media")
     monkeypatch.setattr(media.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(media, "probe_media", lambda path: {"format": {"duration": "10"}})
     captured = []
 
     def fake_run(command, **kwargs):
@@ -34,6 +35,7 @@ def test_audio_mix_adds_voiceover_and_looped_music_inputs(tmp_path, monkeypatch)
     assert command[music_index - 2:music_index] == ["-stream_loop", "-1"]
     filter_graph = command[command.index("-filter_complex") + 1]
     assert "amix=inputs=2" in filter_graph
+    assert "atrim=duration=10.000" in filter_graph
     assert "volume=0.2000" in filter_graph
     assert "-c:a" in command and "aac" in command
     assert "-shortest" in command
