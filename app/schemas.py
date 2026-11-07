@@ -1,4 +1,5 @@
 from typing import Any, Literal
+
 from pydantic import BaseModel, Field, HttpUrl
 
 
@@ -19,20 +20,27 @@ class VideoRequest(BaseModel):
     steps: int = Field(default=6, ge=4, le=8)
     guidance_scale: float = Field(default=1.0, ge=0, le=10)
     guidance_scale_2: float = Field(default=1.0, ge=0, le=10)
-    seed: int | None = None
+    seed: int = Field(default=42, ge=0, le=2147483647)
     randomize_seed: bool = True
 
 
-class JobSubmitResponse(BaseModel):
-    provider: Literal["z-image-turbo", "wan-2.2"]
+class ImageJobSubmitResponse(BaseModel):
+    provider: Literal["z-image-turbo"] = "z-image-turbo"
     event_id: str
     status: str
     detail: str
 
 
-class JobResultResponse(BaseModel):
-    provider: Literal["z-image-turbo", "wan-2.2"]
+class ImageJobResultResponse(BaseModel):
+    provider: Literal["z-image-turbo"] = "z-image-turbo"
     event_id: str
     status: str
     outputs: list[dict[str, Any]] = Field(default_factory=list)
-    raw_events: list[str] = Field(default_factory=list)
+    events: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class VideoResultResponse(BaseModel):
+    provider: Literal["wan-2.2"] = "wan-2.2"
+    status: Literal["completed"] = "completed"
+    output: dict[str, Any]
+    raw_response: dict[str, Any]
