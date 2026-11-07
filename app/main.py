@@ -5,6 +5,7 @@ from fastapi import Depends, FastAPI, HTTPException, Security
 from fastapi.security.api_key import APIKeyHeader
 
 from .config import settings
+from .storage import LocalStore, StorageError
 from .hf_gradio import (
     _find_filedata,
     _validate_public_image_url,
@@ -20,6 +21,9 @@ from .schemas import (
     ImageToVideoPipelineResponse,
     VideoRequest,
     VideoResultResponse,
+    ProjectCreateRequest,
+    ProjectResponse,
+    AssetResponse,
 )
 
 app = FastAPI(
@@ -203,3 +207,134 @@ async def create_image_to_video_pipeline(request: ImageToVideoPipelineRequest):
     # This is a synchronous end-to-end request. Host it on a service that allows
     # long-running requests; a production queue/worker will replace this route later.
     return await _run_image_to_video(request.image, request.video)
+
+
+_ALLOWED_UPLOADS = {
+    ".mp4": {"video/mp4"},
+    ".mov": {"video/quicktime"},
+    ".webm": {"video/webm"},
+    ".jpg": {"image/jpeg"},
+    ".jpeg": {"image/jpeg"},
+    ".png": {"image/png"},
+    ".webp": {"image/webp"},
+    ".mp3": {"audio/mpeg"},
+    ".wav": {"audio/wav", "audio/x-wav"},
+    ".m4a": {"audio/mp4", "audio/x-m4a"},
+}
+
+
+def _store() -> LocalStore:
+    return LocalStore(settings.data_dir)
+
+
+@app.post(
+    "/api/v1/projects",
+    response_model=ProjectResponse,
+    dependencies=[Depends(require_api_key)],
+)
+async def create_project(request: ProjectCreateRequest):
+    project_id = str(uuid.uuid4())
+    try:
+        return _store().create_project(project_id, request.title.strip())
+    except Exception as exc:
+        raise HTTPException(500, "Could not create the project.") from exc
+
+
+@app.get(
+    "/api/v1/projects",
+    response_model=list[ProjectResponse],
+    dependencies=[Depends(require_api_key)],
+)
+async def list_projects():
+    return _store().list_projects()
+
+
+@app.post(
+    "/api/v1/projects/{project_id}/assets",
+    response_model=AssetResponse,
+    dependencies=[Depends(require_api_key)],
+)
+async def upload_project_asset(project_id: str, file: UploadFile = File(...)):
+    try:
+        project_id = str(uuid.UUID(project_id))
+    except ValueError as exc:
+        raise HTTPException(404, "Project not found.") from exc
+
+    store = _store()
+    if not store.get_project(project_id):
+        raise HTTPException(404, "Project not found.")
+
+    supplied_name = (file.filename or "upload").replace("\\", "/").split("/")[-1]
+    extension = Path(supplied_name).suffix.lower()
+    media_type = (file.content_type or "").lower()
+    if extension not in _ALLOWED_UPLOADS or media_type not in _ALLOWED_UPLOADS[extension]:
+        raise HTTPException(415, "Unsupported file type or mismatched media type.")
+
+    asset_id = str(uuid.uuid4())
+    stored_name = f"{asset_id}{extension}"
+    temporary_path = store.asset_dir / f".{asset_id}.upload"
+    final_path = store.asset_dir / stored_name
+    digest = hashlib.sha256()
+    size = 0
+
+    try:
+        with temporary_path.open("xb") as destination:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > settings.max_upload_bytes:
+                    raise HTTPException(413, "Upload exceeds the configured size limit.")
+                digest.update(chunk)
+                destination.write(chunk)
+
+        if size == 0:
+            raise HTTPException(400, "Uploaded file is empty.")
+
+        temporary_path.replace(final_path)
+        asset = store.register_asset({
+            "id": asset_id,
+            "project_id": project_id,
+            "original_name": supplied_name[:255],
+            "stored_name": stored_name,
+            "media_type": media_type,
+            "size_bytes": size,
+            "sha256": digest.hexdigest(),
+        })
+        return {key: asset[key] for key in (
+            "id", "project_id", "original_name", "media_type",
+            "size_bytes", "sha256", "created_at"
+        )}
+    except HTTPException:
+        temporary_path.unlink(missing_ok=True)
+        final_path.unlink(missing_ok=True)
+        raise
+    except (OSError, StorageError) as exc:
+        temporary_path.unlink(missing_ok=True)
+        final_path.unlink(missing_ok=True)
+        raise HTTPException(500, "Could not store the uploaded asset.") from exc
+    finally:
+        await file.close()
+
+
+@app.get(
+    "/api/v1/projects/{project_id}/assets",
+    response_model=list[AssetResponse],
+    dependencies=[Depends(require_api_key)],
+)
+async def list_project_assets(project_id: str):
+    try:
+        project_id = str(uuid.UUID(project_id))
+    except ValueError as exc:
+        raise HTTPException(404, "Project not found.") from exc
+    store = _store()
+    if not store.get_project(project_id):
+        raise HTTPException(404, "Project not found.")
+    return [
+        {key: asset[key] for key in (
+            "id", "project_id", "original_name", "media_type",
+            "size_bytes", "sha256", "created_at"
+        )}
+        for asset in store.list_assets(project_id)
+    ]
