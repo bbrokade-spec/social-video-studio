@@ -131,8 +131,9 @@ def assemble_video(
         command.extend(["-i", str(source)])
     audio_input_indices = []
     music_duration = None
-    if music_path is not None:
-        music_duration = 0.0
+    timeline_duration = None
+    if voiceover_path is not None or music_path is not None:
+        timeline_duration = 0.0
         for source, trim in zip(sources, normalized_trims):
             metadata = probe_media(source)
             try:
@@ -143,7 +144,9 @@ def assemble_video(
             clip_duration = min(end - start, source_duration - start) if end is not None else source_duration - start
             if not math.isfinite(clip_duration) or clip_duration <= 0:
                 raise MediaError("A clip trim range exceeds the source clip duration.")
-            music_duration += clip_duration
+            timeline_duration += clip_duration
+        if music_path is not None:
+            music_duration = timeline_duration
     for audio_path, is_music in ((voiceover_path, False), (music_path, True)):
         if audio_path is None:
             continue
@@ -178,7 +181,7 @@ def assemble_video(
     command.extend([
         "-filter_complex", ";".join(filters),
         "-map", "[vout]",
-        *( ["-map", "[aout]", "-c:a", "aac", "-b:a", "192k", "-shortest"] if audio_labels else ["-an"] ),
+        *( ["-map", "[aout]", "-c:a", "aac", "-b:a", "192k", "-t", f"{timeline_duration:.3f}"] if audio_labels else ["-an"] ),
         "-c:v", "libx264",
         "-preset", "veryfast",
         "-crf", "20",
