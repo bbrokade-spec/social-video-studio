@@ -32,7 +32,7 @@ def test_audio_mix_adds_voiceover_and_looped_music_inputs(tmp_path, monkeypatch)
     command = captured[0]
     assert command.count("-i") == 3
     music_index = command.index(str(music))
-    input_index = command.rindex("-i", 0, music_index)
+    input_index = max(index for index, argument in enumerate(command[:music_index]) if argument == "-i")
     assert command[input_index - 2:input_index] == ["-stream_loop", "-1"]
     filter_graph = command[command.index("-filter_complex") + 1]
     assert "amix=inputs=2" in filter_graph
