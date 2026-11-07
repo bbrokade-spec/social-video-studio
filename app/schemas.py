@@ -8,7 +8,7 @@ class ImageRequest(BaseModel):
     resolution: str = "720x1280 ( 9:16 )"
     steps: int = Field(default=8, ge=1, le=100)
     shift: float = Field(default=3.0, ge=0, le=20)
-    seed: int | None = None
+    seed: int = Field(default=42, ge=0, le=2147483647)
     random_seed: bool = True
 
 
