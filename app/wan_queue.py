@@ -146,7 +146,7 @@ async def generate_wan_from_local_image(
     files: list[dict[str, Any]] = []
     for item in completed:
         files.extend(_file_data(item.get("data")))
-    video_file = next((item for item in files if isinstance(item.get("url"), str) and item["url"].startswith("https://")), None)
+    video_file = next((item for item in files if isinstance(item.get("url"), str) and item["url"].strip()), None)
     if not video_file:
         raise HTTPException(502, "Wan completed but did not return a downloadable video URL.")
     return {"file": video_file, "events": events, "url": urljoin(base + "/", video_file["url"])}
