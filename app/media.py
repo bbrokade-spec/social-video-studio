@@ -130,6 +130,20 @@ def assemble_video(
                 command.extend(["-t", f"{end - start:.3f}"])
         command.extend(["-i", str(source)])
     audio_input_indices = []
+    music_duration = None
+    if music_path is not None:
+        music_duration = 0.0
+        for source, trim in zip(sources, normalized_trims):
+            metadata = probe_media(source)
+            try:
+                source_duration = float(metadata["format"]["duration"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise MediaError("Could not determine a source clip duration for music mixing.") from exc
+            start, end = trim if trim is not None else (0.0, None)
+            clip_duration = min(end - start, source_duration - start) if end is not None else source_duration - start
+            if not math.isfinite(clip_duration) or clip_duration <= 0:
+                raise MediaError("A clip trim range exceeds the source clip duration.")
+            music_duration += clip_duration
     for audio_path, is_music in ((voiceover_path, False), (music_path, True)):
         if audio_path is None:
             continue
@@ -155,7 +169,8 @@ def assemble_video(
     for audio_index, is_music in audio_input_indices:
         label = f"a{audio_index}"
         volume = music_volume if is_music else voiceover_volume
-        filters.append(f"[{audio_index}:a:0]aresample=48000,volume={volume:.4f},afade=t=in:st=0:d={fade_in_seconds:.3f},areverse,afade=t=in:st=0:d={fade_out_seconds:.3f},areverse[{label}]")
+        duration_filter = f"atrim=duration={music_duration:.3f},asetpts=PTS-STARTPTS," if is_music and music_duration is not None else ""
+        filters.append(f"[{audio_index}:a:0]{duration_filter}aresample=48000,volume={volume:.4f},afade=t=in:st=0:d={fade_in_seconds:.3f},areverse,afade=t=in:st=0:d={fade_out_seconds:.3f},areverse[{label}]")
         audio_labels.append(f"[{label}]")
     if audio_labels:
         filters.append("".join(audio_labels) + f"amix=inputs={len(audio_labels)}:duration=longest:dropout_transition=0,alimiter=limit=0.95[aout]")
