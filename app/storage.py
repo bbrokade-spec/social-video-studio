@@ -288,10 +288,10 @@ class LocalStore:
             for scene in plan["scenes"]:
                 db.execute(
                     """INSERT INTO script_scenes
-                    (id, plan_id, position, narration_text, visual_prompt, negative_prompt, duration_seconds)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (id, plan_id, position, narration_text, visual_prompt, negative_prompt, duration_seconds, asset_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                     (scene["id"], plan_id, scene["position"], scene["narration_text"],
-                     scene["visual_prompt"], scene.get("negative_prompt", ""), scene["duration_seconds"]),
+                     scene["visual_prompt"], scene.get("negative_prompt", ""), scene["duration_seconds"], scene.get("asset_id")),
                 )
             db.execute("UPDATE projects SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?", (existing["project_id"],))
         return self.get_script_plan(plan_id)
