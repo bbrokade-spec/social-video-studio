@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Social Video Studio</title>
+<style>
+:root{font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;color:#eef2f8;background:#0b1018;font-synthesis:none}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 15% 0%,#1b2b42 0,transparent 45%),#0b1018;min-height:100vh}
+header{padding:26px clamp(18px,5vw,64px);border-bottom:1px solid #273344;display:flex;align-items:center;justify-content:space-between;gap:16px}
+.brand{font-weight:750;letter-spacing:.02em;font-size:18px}.brand span{color:#78b7ff}.sub{color:#98a8bc;font-size:13px;margin-top:4px}
+main{max-width:1180px;margin:34px auto;padding:0 20px 60px}.topline{display:flex;justify-content:space-between;align-items:end;gap:20px;margin-bottom:24px}
+h1{font-size:clamp(27px,4vw,38px);margin:0 0 8px;letter-spacing:-.04em}p{color:#9eacc0;line-height:1.55;margin:0}
+.layout{display:grid;grid-template-columns:310px minmax(0,1fr);gap:18px}.panel{background:#111a26;border:1px solid #283548;border-radius:15px;padding:20px;min-width:0}
+h2{font-size:15px;margin:0 0 15px;color:#dce7f5}.muted{color:#91a1b6;font-size:12px}
+label{display:block;color:#aebdd0;font-size:12px;margin:13px 0 7px}input,select{width:100%;border:1px solid #34445b;background:#0b121c;color:#edf4ff;border-radius:9px;padding:11px 12px;font:inherit;font-size:14px}
+button{border:1px solid #3c5879;background:#1b3959;color:#eaf4ff;padding:10px 14px;border-radius:9px;font:600 13px inherit;cursor:pointer}
+button:hover{background:#254b73}button:disabled{opacity:.5;cursor:wait}.primary{background:#2674c9;border-color:#398de5}.secondary{background:#172333}.row{display:flex;gap:9px;align-items:center}.row>*{min-width:0}.row button{white-space:nowrap}
+.project-list{display:grid;gap:8px;margin-top:14px}.project{width:100%;text-align:left;background:#0d1520;border-color:#2b3a4e;padding:12px}.project.active{border-color:#65adff;background:#13253a}.project strong{display:block;font-size:13px}.project small{color:#8fa1b7;font-size:11px}
+.toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:15px}.toolbar h2{margin:0}
+.drop{border:1px dashed #405673;background:#0d1520;border-radius:12px;padding:18px;text-align:center;margin:15px 0}.drop input{border:0;padding:8px;background:transparent}
+.asset-list{display:grid;gap:9px;margin:15px 0}.asset{display:flex;align-items:center;gap:10px;padding:12px;background:#0c1420;border:1px solid #26364a;border-radius:10px}.asset input{width:auto}.asset-name{font-size:13px;overflow-wrap:anywhere;flex:1}.asset-meta{font-size:11px;color:#91a1b6;margin-top:3px}.trim-fields{display:flex;gap:6px;width:190px}.trim-fields input{min-width:0;width:50%;padding:7px;font-size:12px}
+.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:15px}.status{min-height:20px;font-size:12px;color:#a9c8eb;margin-top:12px}.error{color:#ff9e9e}.empty{padding:28px 10px;text-align:center;color:#8293a9;font-size:13px}
+.keyline{display:flex;gap:8px;align-items:center}.keyline input{flex:1}.keyline button{padding:9px 12px}
+footer{color:#65778e;text-align:center;font-size:11px;padding:22px}
+@media(max-width:760px){.layout{grid-template-columns:1fr}.topline{display:block}.topline p{margin-top:8px}header{align-items:flex-start}.keyline{margin-top:12px}}
+</style>
+</head>
+<body>
+<header><div><div class="brand">SOCIAL VIDEO <span>STUDIO</span></div><div class="sub">Local-first production workspace</div></div><div class="muted">FINOMICS · PRIVATE WORKSPACE</div></header>
+<main>
+<div class="topline"><div><h1>Your production desk.</h1><p>Organise source clips, set in and out points, and export a vertical or landscape MP4.</p></div></div>
+<section class="panel" style="margin-bottom:18px">
+<div class="toolbar"><h2>Local API connection</h2><span class="muted">Key stays in this browser tab</span></div>
+<div class="keyline"><input id="apiKey" type="password" autocomplete="off" placeholder="Enter your local API key"><button id="connect">Connect</button></div>
+<div class="status" id="connection">Not connected. Enter the API key configured in your local .env file.</div>
+</section>
+<div class="layout">
+<aside class="panel">
+<h2>Projects</h2>
+<div class="row"><input id="newTitle" maxlength="120" placeholder="New project title"><button id="create">Create</button></div>
+<div class="project-list" id="projects"><div class="empty">Connect to load projects.</div></div>
+</aside>
+<section class="panel">
+<div class="toolbar"><h2 id="projectHeading">Project workspace</h2><span class="muted" id="assetCount">0 assets</span></div>
+<div id="workspace"><div class="empty">Select or create a project to begin.</div></div>
+</section>
+</div>
+</main>
+<footer>Runs against your local Social Video Studio API. No media is uploaded to this interface provider.</footer>
+<script>
+(() => {
+const $ = id => document.getElementById(id);
+let apiKey = "", activeProject = null, assets = [];
+const request = async (path, options={}) => {
+  const headers = new Headers(options.headers || {});
+  headers.set("X-API-Key", apiKey);
+  const response = await fetch(path, {...options, headers});
+  if (!response.ok) {
+    let detail = response.statusText;
+    try { const body = await response.json(); detail = body.detail || detail; } catch {}
+    throw new Error(detail);
+  }
+  return response.status === 204 ? null : response.json();
+};
+const status = (message, error=false) => { $("connection").textContent=message; $("connection").className="status"+(error?" error":""); };
+const workStatus = (message,error=false) => { const el=$("workStatus"); if(el){el.textContent=message;el.className="status"+(error?" error":"");} };
+const bytes = n => n < 1048576 ? (n/1024).toFixed(0)+" KB" : (n/1048576).toFixed(1)+" MB";
+async function loadProjects() {
+  const projects = await request("/api/v1/projects");
+  const host=$("projects"); host.replaceChildren();
+  if (!projects.length) { host.innerHTML='<div class="empty">No projects yet. Create one above.</div>'; return; }
+  projects.forEach(project => {
+    const button=document.createElement("button"); button.className="project"+(activeProject?.id===project.id?" active":"");
+    const strong=document.createElement("strong"); strong.textContent=project.title;
+    const small=document.createElement("small"); small.textContent=new Date(project.updated_at).toLocaleString();
+    button.append(strong,small); button.onclick=()=>selectProject(project); host.append(button);
+  });
+}
+async function selectProject(project) { activeProject=project; await loadProjects(); await loadAssets(); }
+async function loadAssets() {
+  if(!activeProject)return;
+  assets=await request("/api/v1/projects/"+activeProject.id+"/assets");
+  $("projectHeading").textContent=activeProject.title;
+  $("assetCount").textContent=assets.length+" assets";
+  renderWorkspace();
+}
+function renderWorkspace() {
+  const host=$("workspace"); host.replaceChildren();
+  const upload=document.createElement("div"); upload.className="drop";
+  upload.innerHTML='<strong>Add source media</strong><div class="muted" style="margin:5px 0 10px">Video, image, or audio files. Max size is configured by the local server.</div><input id="files" type="file" multiple accept="video/mp4,video/quicktime,video/webm,image/jpeg,image/png,image/webp,audio/mpeg,audio/wav,audio/mp4">';
+  host.append(upload);
+  $("files").addEventListener("change", uploadFiles);
+  const list=document.createElement("div"); list.className="asset-list";
+  const videos=assets.filter(a=>a.media_type.startsWith("video/"));
+  if(!assets.length) list.innerHTML='<div class="empty">No media added yet.</div>';
+  assets.forEach(asset=>{
+    const item=document.createElement("label"); item.className="asset";
+    const check=document.createElement("input"); check.type="checkbox"; check.className="video-select"; check.value=asset.id; check.disabled=!asset.media_type.startsWith("video/");
+    const info=document.createElement("div"); info.className="asset-name";
+    const name=document.createElement("div"); name.textContent=asset.original_name;
+    const meta=document.createElement("div"); meta.className="asset-meta"; meta.textContent=asset.media_type+" · "+bytes(asset.size_bytes);
+    info.append(name,meta); item.append(check,info);
+    if(asset.media_type.startsWith("video/")) {
+      const trim=document.createElement("div"); trim.className="trim-fields";
+      const start=document.createElement("input"); start.type="number"; start.min="0"; start.step="0.1"; start.value="0"; start.title="Start time in seconds"; start.setAttribute("aria-label","Start seconds for "+asset.original_name); start.dataset.trimStart=asset.id;
+      const end=document.createElement("input"); end.type="number"; end.min="0.1"; end.step="0.1"; end.placeholder="End (optional)"; end.title="End time in seconds, leave blank for end of clip"; end.setAttribute("aria-label","End seconds for "+asset.original_name); end.dataset.trimEnd=asset.id;
+      trim.append(start,end); item.append(trim);
+    }
+    list.append(item);
+  });
+  host.append(list);
+  const controls=document.createElement("div"); controls.innerHTML='<div class="row"><div style="flex:1"><label for="profile">Export format</label><select id="profile"><option value="vertical">Vertical · 9:16 · 1080 × 1920</option><option value="landscape">Landscape · 16:9 · 1920 × 1080</option></select></div><div style="width:120px"><label for="fps">Frame rate</label><select id="fps"><option>24</option><option selected>30</option><option>60</option></select></div></div><div class="actions"><button class="primary" id="export">Assemble selected clips</button><button class="secondary" id="refresh">Refresh assets</button></div><div class="status" id="workStatus">Select clips in sequence. Set optional start and end times in seconds beside each clip. Exports are currently silent.</div>';
+  host.append(controls);
+  $("export").onclick=exportVideo; $("refresh").onclick=loadAssets;
+}
+async function uploadFiles(event) {
+  const files=[...event.target.files]; if(!files.length)return;
+  workStatus("Uploading "+files.length+" file(s)...");
+  for(const file of files) {
+    const form=new FormData(); form.append("file",file);
+    try { await request("/api/v1/projects/"+activeProject.id+"/assets",{method:"POST",body:form}); }
+    catch(error){workStatus(file.name+": "+error.message,true);return;}
+  }
+  await loadAssets(); workStatus("Upload complete.");
+}
+async function exportVideo() {
+  const ids=[...document.querySelectorAll(".video-select:checked")].map(el=>el.value);
+  if(!ids.length){workStatus("Choose at least one video clip.",true);return;}
+  $("export").disabled=true; workStatus("Rendering MP4. Longer clips may take several minutes...");
+  try {
+    const job=await request("/api/v1/projects/"+activeProject.id+"/export-jobs",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({asset_ids:ids,profile:$("profile").value,fps:Number($("fps").value),clip_trims:ids.map(id=>({asset_id:id,start_seconds:Number(document.querySelector('[data-trim-start="'+id+'"]')?.value||0),end_seconds:document.querySelector('[data-trim-end="'+id+'"]')?.value?Number(document.querySelector('[data-trim-end="'+id+'"]')?.value):null}))})});
+    let current=job;
+    while(current.status==="queued" || current.status==="running") {
+      workStatus("Export "+current.status+" · "+current.progress+"% complete...");
+      await new Promise(resolve=>setTimeout(resolve,1000));
+      current=await request("/api/v1/export-jobs/"+job.id);
+    }
+    if(current.status!=="completed" || !current.result_asset_id)throw new Error(current.error_message || "Export failed.");
+    const response=await fetch("/api/v1/assets/"+current.result_asset_id+"/download",{headers:{"X-API-Key":apiKey}});
+    if(!response.ok)throw new Error("Export completed but download failed.");
+    const blob=await response.blob(); const url=URL.createObjectURL(blob); const link=document.createElement("a");
+    link.href=url; link.download="export-"+current.profile+".mp4"; document.body.append(link); link.click(); link.remove(); URL.revokeObjectURL(url);
+    await loadAssets(); workStatus("Export ready and download started.");
+  } catch(error){workStatus(error.message,true);}
+  finally{$("export").disabled=false;}
+}
+$("connect").onclick=async()=>{
+  apiKey=$("apiKey").value.trim();
+  if(!apiKey){status("Enter the API key first.",true);return;}
+  try { await request("/api/v1/projects"); status("Connected to local API."); await loadProjects(); }
+  catch(error){apiKey="";status(error.message,true);}
+};
+$("create").onclick=async()=>{
+  if(!apiKey){status("Connect first.",true);return;}
+  const title=$("newTitle").value.trim(); if(!title){status("Enter a project title.",true);return;}
+  try {const project=await request("/api/v1/projects",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({title})});$("newTitle").value="";await selectProject(project);}
+  catch(error){status(error.message,true);}
+};
+})();
+</script>
+</body>
+</html>
