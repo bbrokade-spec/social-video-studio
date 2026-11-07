@@ -102,11 +102,21 @@ class ClipTrim(BaseModel):
         return self
 
 
+class AudioMixSettings(BaseModel):
+    voiceover_asset_id: str | None = None
+    music_asset_id: str | None = None
+    voiceover_volume: float = Field(default=1.0, ge=0, le=2)
+    music_volume: float = Field(default=0.18, ge=0, le=2)
+    fade_in_seconds: float = Field(default=0.5, ge=0, le=10)
+    fade_out_seconds: float = Field(default=1.0, ge=0, le=10)
+
+
 class MediaExportRequest(BaseModel):
     asset_ids: list[str] = Field(min_length=1, max_length=50)
     profile: Literal["vertical", "landscape"] = "vertical"
     fps: int = Field(default=30, ge=1, le=60)
     clip_trims: list[ClipTrim] | None = None
+    audio: AudioMixSettings | None = None
 
     @model_validator(mode="after")
     def validate_clip_trims(self):
