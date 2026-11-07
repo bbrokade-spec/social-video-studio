@@ -26,6 +26,15 @@ def test_export_job_lifecycle_and_restart_recovery(tmp_path):
     assert queued["progress"] == 0
 
     recovered.claim_next_export_job()
+    recovered.register_asset({
+        "id": "asset-result",
+        "project_id": project["id"],
+        "original_name": "render.mp4",
+        "stored_name": "asset-result.mp4",
+        "media_type": "video/mp4",
+        "size_bytes": 10,
+        "sha256": "a" * 64,
+    })
     recovered.update_export_job(
         "job-1", status="completed", progress=100, result_asset_id="asset-result"
     )
