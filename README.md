@@ -29,7 +29,11 @@ Set `API_KEY` and `HF_TOKEN` in `.env`, then run:
 uvicorn app.main:app --reload
 ```
 
-Open http://127.0.0.1:8000/docs.
+Open http://127.0.0.1:8000/ for the local production workspace, or http://127.0.0.1:8000/docs for the API documentation.
+
+The browser workspace supports local project creation, source-media upload, asset selection, silent MP4 assembly, and download. Enter the same `API_KEY` configured in `.env` when prompted. The key is held in the page's JavaScript memory only and is cleared by a page refresh. Keep the server bound to loopback (`127.0.0.1`) unless you have separately configured network access controls and HTTPS.
+
+The first export implementation only concatenates complete video clips. It does not yet provide trimming, transitions, voiceover, music, subtitles, generated scenes, or a durable background job queue. FFmpeg and FFprobe must be installed and available on PATH for media inspection and export.
 
 Never commit a real Hugging Face token or API key.
 
