@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: social-video-studio-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: API_KEY
+        generateValue: true
+      - key: HF_TOKEN
+        sync: false
+      - key: ALLOW_UNAUTHENTICATED_GENERATION
+        value: "false"
+      - key: ZIMAGE_BASE_URL
+        value: https://mcp-tools-z-image-turbo.hf.space
+      - key: WAN_BASE_URL
+        value: https://zerogpu-aoti-wan2-2-fp8da-aoti-faster.hf.space
+      - key: HTTP_TIMEOUT_SECONDS
+        value: "60"
+      - key: GENERATION_WAIT_SECONDS
+        value: "240"
