@@ -95,11 +95,27 @@ function renderScriptStudio(host) {
   const addScene=(scene={})=>{
     const index=sceneCount++;
     const card=document.createElement("div");card.style.cssText="border:1px solid #2b3a4e;border-radius:10px;padding:14px;margin:10px 0;background:#0d1520";
-    card.innerHTML='<div class="toolbar"><strong>Scene '+(index+1)+'</strong><button type="button" class="secondary removeScene">Remove</button></div><label>Narration for this scene</label><textarea class="narration" rows="2" maxlength="5000" style="width:100%;border:1px solid #34445b;background:#0b121c;color:#edf4ff;border-radius:9px;padding:10px;font:inherit;resize:vertical"></textarea><label>Visual prompt for AI image generation</label><textarea class="visual" rows="3" maxlength="6000" style="width:100%;border:1px solid #34445b;background:#0b121c;color:#edf4ff;border-radius:9px;padding:10px;font:inherit;resize:vertical"></textarea><label>Negative prompt (optional)</label><input class="negative" maxlength="2000" placeholder="e.g. blurry, text, watermark"><label>Target duration (seconds)</label><input class="duration" type="number" min="0.5" max="30" step="0.5" value="5">';
+    card.innerHTML='<div class="toolbar"><strong>Scene '+(index+1)+'</strong><button type="button" class="secondary removeScene">Remove</button></div><label>Narration for this scene</label><textarea class="narration" rows="2" maxlength="5000" style="width:100%;border:1px solid #34445b;background:#0b121c;color:#edf4ff;border-radius:9px;padding:10px;font:inherit;resize:vertical"></textarea><label>Visual prompt for AI image generation</label><textarea class="visual" rows="3" maxlength="6000" style="width:100%;border:1px solid #34445b;background:#0b121c;color:#edf4ff;border-radius:9px;padding:10px;font:inherit;resize:vertical"></textarea><label>Negative prompt (optional)</label><input class="negative" maxlength="2000" placeholder="e.g. blurry, text, watermark"><label>Target duration (seconds)</label><input class="duration" type="number" min="0.5" max="30" step="0.5" value="5"><div class="actions"><button type="button" class="primary generateSceneImage">Generate image for this scene</button></div><div class="status sceneImageStatus">Image not generated yet.</div><img class="sceneImagePreview" alt="Generated scene preview" style="display:none;width:100%;max-height:420px;object-fit:contain;border:1px solid #34445b;border-radius:9px;margin-top:10px;background:#080d14">';
     card.querySelector(".narration").value=scene.narration_text||"";
     card.querySelector(".visual").value=scene.visual_prompt||"";
     card.querySelector(".negative").value=scene.negative_prompt||"";
     card.querySelector(".duration").value=scene.duration_seconds??5;
+    card.querySelector(".generateSceneImage").onclick=async()=>{
+      const button=card.querySelector(".generateSceneImage"),message=card.querySelector(".sceneImageStatus"),preview=card.querySelector(".sceneImagePreview");
+      const prompt=card.querySelector(".visual").value.trim(),negative_prompt=card.querySelector(".negative").value.trim();
+      if(prompt.length<3){message.textContent="Enter a visual prompt of at least 3 characters first.";message.className="status error";return;}
+      button.disabled=true;message.textContent="Submitting image generation request...";message.className="status";preview.style.display="none";
+      try{
+        const profile=panel.querySelector("#scriptProfile").value;
+        const submitted=await request("/api/v1/images",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({prompt:prompt+(negative_prompt?"\\nNegative prompt: "+negative_prompt:""),resolution:profile==="landscape"?"1280x720 ( 16:9 )":"720x1280 ( 9:16 )",steps:8,shift:3,seed:42,random_seed:true})});
+        message.textContent="Image request submitted. Waiting for the provider...";
+        const result=await request("/api/v1/images/"+encodeURIComponent(submitted.event_id));
+        const imageFile=(result.outputs||[]).find(item=>typeof item.url==="string"&&item.url.startsWith("https://"));
+        if(result.status!=="completed"||!imageFile){throw new Error("The provider did not return a completed image URL. Check the API result before retrying.");}
+        preview.src=imageFile.url;preview.style.display="block";message.textContent="Image generated successfully. This is a preview; it is not yet saved to the project media library.";
+      }catch(error){message.textContent=error.message||"Image generation failed.";message.className="status error";}
+      finally{button.disabled=false;}
+    };
     card.querySelector(".removeScene").onclick=()=>{card.remove();};
     editor.append(card);sceneRows.push(card);
   };
