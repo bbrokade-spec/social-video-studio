@@ -157,3 +157,50 @@ class ExportJobResponse(BaseModel):
     error_message: str | None = None
     created_at: str
     updated_at: str
+
+
+
+class ScriptSceneInput(BaseModel):
+    narration_text: str = Field(min_length=1, max_length=5000)
+    visual_prompt: str = Field(min_length=3, max_length=6000)
+    negative_prompt: str = Field(default="", max_length=2000)
+    duration_seconds: float = Field(default=5.0, ge=0.5, le=30)
+
+
+class ScriptPlanCreateRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
+    full_script: str = Field(min_length=1, max_length=30000)
+    output_profile: Literal["vertical", "landscape"] = "vertical"
+    scenes: list[ScriptSceneInput] = Field(min_length=1, max_length=100)
+
+    @field_validator("title", "full_script")
+    @classmethod
+    def trim_required_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("This field cannot be blank.")
+        return value
+
+
+class ScriptSceneResponse(BaseModel):
+    id: str
+    plan_id: str
+    position: int
+    narration_text: str
+    visual_prompt: str
+    negative_prompt: str
+    duration_seconds: float
+    generation_status: str
+    created_at: str
+    updated_at: str
+
+
+class ScriptPlanResponse(BaseModel):
+    id: str
+    project_id: str
+    title: str
+    full_script: str
+    output_profile: Literal["vertical", "landscape"]
+    created_at: str
+    updated_at: str
+    scenes: list[ScriptSceneResponse]
