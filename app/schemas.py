@@ -12,8 +12,7 @@ class ImageRequest(BaseModel):
     random_seed: bool = True
 
 
-class VideoRequest(BaseModel):
-    input_image: HttpUrl
+class VideoSettings(BaseModel):
     prompt: str = Field(min_length=3, max_length=6000)
     negative_prompt: str | None = None
     duration_seconds: float = Field(default=2.0, ge=0.5, le=5.0)
@@ -22,6 +21,15 @@ class VideoRequest(BaseModel):
     guidance_scale_2: float = Field(default=1.0, ge=0, le=10)
     seed: int = Field(default=42, ge=0, le=2147483647)
     randomize_seed: bool = True
+
+
+class VideoRequest(VideoSettings):
+    input_image: HttpUrl
+
+
+class ImageToVideoPipelineRequest(BaseModel):
+    image: ImageRequest
+    video: VideoSettings
 
 
 class ImageJobSubmitResponse(BaseModel):
@@ -44,3 +52,10 @@ class VideoResultResponse(BaseModel):
     status: Literal["completed"] = "completed"
     output: dict[str, Any]
     raw_response: dict[str, Any]
+
+
+class ImageToVideoPipelineResponse(BaseModel):
+    status: Literal["completed"] = "completed"
+    image_event_id: str
+    image: dict[str, Any]
+    video: dict[str, Any]
