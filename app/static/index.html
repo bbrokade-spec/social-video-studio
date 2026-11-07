@@ -104,7 +104,7 @@ function renderWorkspace() {
     info.append(name,meta); item.append(check,info); list.append(item);
   });
   host.append(list);
-  const controls=document.createElement("div"); controls.innerHTML='<div class="row"><div style="flex:1"><label for="profile">Export format</label><select id="profile"><option value="vertical">Vertical · 9:16 · 1080 × 1920</option><option value="landscape">Landscape · 16:9 · 1920 × 1080</option></select></div><div style="width:120px"><label for="fps">Frame rate</label><select id="fps"><option>24</option><option selected>30</option><option>60</option></select></div></div><div class="actions"><button class="primary" id="export">Assemble selected clips</button><button class="secondary" id="refresh">Refresh assets</button></div><div class="status" id="workStatus">Select at least one video clip to export. Exports are currently silent.</div>';
+  const controls=document.createElement("div"); controls.innerHTML='<div class="row"><div style="flex:1"><label for="profile">Export format</label><select id="profile"><option value="vertical">Vertical · 9:16 · 1080 × 1920</option><option value="landscape">Landscape · 16:9 · 1920 × 1080</option></select></div><div style="width:120px"><label for="fps">Frame rate</label><select id="fps"><option>24</option><option selected>30</option><option>60</option></select></div></div><div class="actions"><button class="primary" id="export">Assemble selected clips</button><button class="secondary" id="refresh">Refresh assets</button></div><div class="status" id="workStatus">Select at least one video clip to export. Exports are currently silent. Jobs continue in the background and survive app restarts.</div>';
   host.append(controls);
   $("export").onclick=exportVideo; $("refresh").onclick=loadAssets;
 }
@@ -123,11 +123,18 @@ async function exportVideo() {
   if(!ids.length){workStatus("Choose at least one video clip.",true);return;}
   $("export").disabled=true; workStatus("Rendering MP4. Longer clips may take several minutes...");
   try {
-    const asset=await request("/api/v1/projects/"+activeProject.id+"/exports",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({asset_ids:ids,profile:$("profile").value,fps:Number($("fps").value)})});
-    const response=await fetch("/api/v1/assets/"+asset.id+"/download",{headers:{"X-API-Key":apiKey}});
+    const job=await request("/api/v1/projects/"+activeProject.id+"/export-jobs",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({asset_ids:ids,profile:$("profile").value,fps:Number($("fps").value)})});
+    let current=job;
+    while(current.status==="queued" || current.status==="running") {
+      workStatus("Export "+current.status+" · "+current.progress+"% complete...");
+      await new Promise(resolve=>setTimeout(resolve,1000));
+      current=await request("/api/v1/export-jobs/"+job.id);
+    }
+    if(current.status!=="completed" || !current.result_asset_id)throw new Error(current.error_message || "Export failed.");
+    const response=await fetch("/api/v1/assets/"+current.result_asset_id+"/download",{headers:{"X-API-Key":apiKey}});
     if(!response.ok)throw new Error("Export completed but download failed.");
     const blob=await response.blob(); const url=URL.createObjectURL(blob); const link=document.createElement("a");
-    link.href=url; link.download=asset.original_name; document.body.append(link); link.click(); link.remove(); URL.revokeObjectURL(url);
+    link.href=url; link.download="export-"+current.profile+".mp4"; document.body.append(link); link.click(); link.remove(); URL.revokeObjectURL(url);
     await loadAssets(); workStatus("Export ready and download started.");
   } catch(error){workStatus(error.message,true);}
   finally{$("export").disabled=false;}
