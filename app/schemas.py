@@ -165,6 +165,7 @@ class ScriptSceneInput(BaseModel):
     visual_prompt: str = Field(min_length=3, max_length=6000)
     negative_prompt: str = Field(default="", max_length=2000)
     duration_seconds: float = Field(default=5.0, ge=0.5, le=30)
+    asset_id: str | None = Field(default=None, min_length=1, max_length=64)
 
     @field_validator("narration_text", "visual_prompt")
     @classmethod
@@ -198,6 +199,7 @@ class ScriptSceneResponse(BaseModel):
     visual_prompt: str
     negative_prompt: str
     duration_seconds: float
+    asset_id: str | None = None
     generation_status: str
     created_at: str
     updated_at: str
