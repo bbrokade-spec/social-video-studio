@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, field_validator
 
 
 class ImageRequest(BaseModel):
@@ -59,3 +59,32 @@ class ImageToVideoPipelineResponse(BaseModel):
     image_event_id: str
     image: dict[str, Any]
     video: dict[str, Any]
+
+
+class ProjectCreateRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
+
+    @field_validator("title")
+    @classmethod
+    def normalize_title(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Project title cannot be blank.")
+        return value
+
+
+class ProjectResponse(BaseModel):
+    id: str
+    title: str
+    created_at: str
+    updated_at: str
+
+
+class AssetResponse(BaseModel):
+    id: str
+    project_id: str
+    original_name: str
+    media_type: str
+    size_bytes: int
+    sha256: str
+    created_at: str
