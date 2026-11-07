@@ -92,14 +92,34 @@ function renderScriptStudio(host) {
   host.append(panel);
   let currentPlanId=null, sceneCount=0;
   const editor=panel.querySelector("#sceneEditor"), sceneRows=[];
+  const imageAssets=()=>assets.filter(asset=>asset.media_type.startsWith("image/"));
+  const populateSceneImageSelect=(card, selectedId="")=>{
+    const select=card.querySelector(".sceneImageAsset");select.replaceChildren(new Option("No image assigned",""));
+    imageAssets().forEach(asset=>select.add(new Option(asset.original_name,asset.id)));
+    select.value=selectedId||"";
+  };
+  const showSavedSceneImage=async(card,assetId)=>{
+    const preview=card.querySelector(".sceneImagePreview"),message=card.querySelector(".sceneImageStatus");
+    if(!assetId){preview.removeAttribute("src");preview.style.display="none";message.textContent="No saved image assigned.";return;}
+    try{
+      const response=await fetch("/api/v1/assets/"+encodeURIComponent(assetId)+"/download",{headers:{"X-API-Key":apiKey}});
+      if(!response.ok)throw new Error("Could not load the saved scene image.");
+      const blob=await response.blob();if(card._sceneImageUrl)URL.revokeObjectURL(card._sceneImageUrl);
+      card._sceneImageUrl=URL.createObjectURL(blob);preview.src=card._sceneImageUrl;preview.style.display="block";
+      message.textContent="Saved project image assigned to this scene.";
+    }catch(error){message.textContent=error.message;message.className="status error";}
+  };
   const addScene=(scene={})=>{
     const index=sceneCount++;
     const card=document.createElement("div");card.style.cssText="border:1px solid #2b3a4e;border-radius:10px;padding:14px;margin:10px 0;background:#0d1520";
-    card.innerHTML='<div class="toolbar"><strong>Scene '+(index+1)+'</strong><button type="button" class="secondary removeScene">Remove</button></div><label>Narration for this scene</label><textarea class="narration" rows="2" maxlength="5000" style="width:100%;border:1px solid #34445b;background:#0b121c;color:#edf4ff;border-radius:9px;padding:10px;font:inherit;resize:vertical"></textarea><label>Visual prompt for AI image generation</label><textarea class="visual" rows="3" maxlength="6000" style="width:100%;border:1px solid #34445b;background:#0b121c;color:#edf4ff;border-radius:9px;padding:10px;font:inherit;resize:vertical"></textarea><label>Negative prompt (optional)</label><input class="negative" maxlength="2000" placeholder="e.g. blurry, text, watermark"><label>Target duration (seconds)</label><input class="duration" type="number" min="0.5" max="30" step="0.5" value="5"><div class="actions"><button type="button" class="primary generateSceneImage">Generate image for this scene</button></div><div class="status sceneImageStatus">Image not generated yet.</div><img class="sceneImagePreview" alt="Scene image preview" style="display:none;width:100%;max-height:420px;object-fit:contain;border:1px solid #34445b;border-radius:9px;margin-top:10px;background:#080d14"><label>Or import an image generated with ChatGPT</label><input class="chatgptImageFile" type="file" accept="image/png,image/jpeg,image/webp"><div class="status chatgptImageStatus">Choose a ChatGPT-generated image saved on your computer to add it to this project media library.</div>';
+    card.innerHTML='<div class="toolbar"><strong>Scene '+(index+1)+'</strong><button type="button" class="secondary removeScene">Remove</button></div><label>Narration for this scene</label><textarea class="narration" rows="2" maxlength="5000" style="width:100%;border:1px solid #34445b;background:#0b121c;color:#edf4ff;border-radius:9px;padding:10px;font:inherit;resize:vertical"></textarea><label>Visual prompt for AI image generation</label><textarea class="visual" rows="3" maxlength="6000" style="width:100%;border:1px solid #34445b;background:#0b121c;color:#edf4ff;border-radius:9px;padding:10px;font:inherit;resize:vertical"></textarea><label>Negative prompt (optional)</label><input class="negative" maxlength="2000" placeholder="e.g. blurry, text, watermark"><label>Target duration (seconds)</label><input class="duration" type="number" min="0.5" max="30" step="0.5" value="5"><div class="actions"><button type="button" class="primary generateSceneImage">Generate image for this scene</button></div><div class="status sceneImageStatus">Image not generated yet.</div><img class="sceneImagePreview" alt="Scene image preview" style="display:none;width:100%;max-height:420px;object-fit:contain;border:1px solid #34445b;border-radius:9px;margin-top:10px;background:#080d14"><label>Saved project image for this scene</label><select class="sceneImageAsset"></select><div class="status sceneImageStatus">No saved image assigned.</div><label>Or import an image generated with ChatGPT</label><input class="chatgptImageFile" type="file" accept="image/png,image/jpeg,image/webp"><div class="status chatgptImageStatus">Choose a ChatGPT-generated image to add it to this project media library.</div>';
     card.querySelector(".narration").value=scene.narration_text||"";
     card.querySelector(".visual").value=scene.visual_prompt||"";
     card.querySelector(".negative").value=scene.negative_prompt||"";
     card.querySelector(".duration").value=scene.duration_seconds??5;
+    populateSceneImageSelect(card,scene.asset_id||"");
+    card.querySelector(".sceneImageAsset").onchange=()=>showSavedSceneImage(card,card.querySelector(".sceneImageAsset").value);
+    if(scene.asset_id)showSavedSceneImage(card,scene.asset_id);
     card.querySelector(".chatgptImageFile").onchange=async(event)=>{
       const file=event.target.files?.[0];if(!file)return;
       const message=card.querySelector(".chatgptImageStatus"),preview=card.querySelector(".sceneImagePreview");
@@ -108,10 +128,11 @@ function renderScriptStudio(host) {
       try{
         const form=new FormData();form.append("file",file);
         const asset=await request("/api/v1/projects/"+activeProject.id+"/assets",{method:"POST",body:form});
-        const reader=new FileReader();
-        reader.onload=()=>{preview.src=reader.result;preview.style.display="block";message.textContent="Imported from ChatGPT and saved to project media: "+asset.original_name+". Refresh project assets to see it in the media list.";};
-        reader.onerror=()=>{message.textContent="Image was saved, but the local preview could not be displayed.";message.className="status error";};
-        reader.readAsDataURL(file);
+        assets=await request("/api/v1/projects/"+activeProject.id+"/assets");
+        $("assetCount").textContent=assets.length+" assets";
+        populateSceneImageSelect(card,asset.id);
+        await showSavedSceneImage(card,asset.id);
+        message.textContent="Uploaded to project media and assigned to this scene. Click Save script and scenes to keep the assignment.";
       }catch(error){message.textContent=error.message||"Could not import this image.";message.className="status error";}
       finally{event.target.value="";}
     };
@@ -154,7 +175,7 @@ function renderScriptStudio(host) {
   panel.querySelector("#savePlan").onclick=async()=>{
     const title=panel.querySelector("#planTitle").value.trim(),full_script=panel.querySelector("#fullScript").value.trim();
     const cards=[...editor.children];
-    const scenes=cards.map(card=>({narration_text:card.querySelector(".narration").value.trim(),visual_prompt:card.querySelector(".visual").value.trim(),negative_prompt:card.querySelector(".negative").value.trim(),duration_seconds:Number(card.querySelector(".duration").value)}));
+    const scenes=cards.map(card=>({narration_text:card.querySelector(".narration").value.trim(),visual_prompt:card.querySelector(".visual").value.trim(),negative_prompt:card.querySelector(".negative").value.trim(),duration_seconds:Number(card.querySelector(".duration").value),asset_id:card.querySelector(".sceneImageAsset").value||null}));
     if(!title||!full_script||!scenes.length||scenes.some(x=>!x.narration_text||x.visual_prompt.length<3||!Number.isFinite(x.duration_seconds)||x.duration_seconds<0.5||x.duration_seconds>30)){setStatus("Complete the title, script and each scene. Scene duration must be 0.5 to 30 seconds.",true);return;}
     const payload={title,full_script,output_profile:panel.querySelector("#scriptProfile").value,scenes};
     const save=panel.querySelector("#savePlan");save.disabled=true;setStatus("Saving script plan...");
