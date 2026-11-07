@@ -172,8 +172,15 @@ def assemble_video(
     for audio_index, is_music in audio_input_indices:
         label = f"a{audio_index}"
         volume = music_volume if is_music else voiceover_volume
-        duration_filter = f"atrim=duration={music_duration:.3f},asetpts=PTS-STARTPTS," if is_music and music_duration is not None else ""
-        filters.append(f"[{audio_index}:a:0]{duration_filter}aresample=48000,volume={volume:.4f},afade=t=in:st=0:d={fade_in_seconds:.3f},areverse,afade=t=in:st=0:d={fade_out_seconds:.3f},areverse[{label}]")
+        chain = []
+        if is_music and music_duration is not None:
+            chain.extend([f"atrim=duration={music_duration:.3f}", "asetpts=PTS-STARTPTS"])
+        chain.extend(["aresample=48000", f"volume={volume:.4f}"])
+        if fade_in_seconds > 0:
+            chain.append(f"afade=t=in:st=0:d={fade_in_seconds:.3f}")
+        if fade_out_seconds > 0:
+            chain.extend(["areverse", f"afade=t=in:st=0:d={fade_out_seconds:.3f}", "areverse"])
+        filters.append(f"[{audio_index}:a:0]{','.join(chain)}[{label}]")
         audio_labels.append(f"[{label}]")
     if audio_labels:
         filters.append("".join(audio_labels) + f"amix=inputs={len(audio_labels)}:duration=longest:dropout_transition=0,alimiter=limit=0.95[aout]")
