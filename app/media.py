@@ -6,6 +6,7 @@ Audio mixing, subtitles, project manifests, and UI orchestration are separate la
 from __future__ import annotations
 
 import json
+import math
 import shutil
 import subprocess
 from pathlib import Path
@@ -62,6 +63,7 @@ def assemble_video(
     profile: ExportProfile = "vertical",
     fps: int = 30,
     timeout_seconds: int = 900,
+    trim_ranges: Sequence[tuple[float, float | None] | None] | None = None,
 ) -> Path:
     """Normalize and concatenate local video clips into a silent H.264 MP4.
 
@@ -91,9 +93,27 @@ def assemble_video(
     if not destination.parent.is_dir():
         raise MediaError("Output directory does not exist.")
 
+    if trim_ranges is not None and len(trim_ranges) != len(sources):
+        raise MediaError("Provide one trim range for each clip.")
+    normalized_trims = list(trim_ranges) if trim_ranges is not None else [None] * len(sources)
+    for trim in normalized_trims:
+        if trim is None:
+            continue
+        start, end = trim
+        if not math.isfinite(start) or start < 0:
+            raise MediaError("Clip start time must be a finite non-negative number.")
+        if end is not None and (not math.isfinite(end) or end <= start):
+            raise MediaError("Clip end time must be greater than its start time.")
+
     width, height = PROFILES[profile]
     command = [_executable("ffmpeg"), "-hide_banner", "-loglevel", "error", "-y"]
-    for source in sources:
+    for source, trim in zip(sources, normalized_trims):
+        if trim is not None:
+            start, end = trim
+            if start > 0:
+                command.extend(["-ss", f"{start:.3f}"])
+            if end is not None:
+                command.extend(["-t", f"{end - start:.3f}"])
         command.extend(["-i", str(source)])
 
     filters = []
