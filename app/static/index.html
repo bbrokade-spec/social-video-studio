@@ -30,7 +30,7 @@ footer{color:#65778e;text-align:center;font-size:11px;padding:22px}
 <body>
 <header><div><div class="brand">SOCIAL VIDEO <span>STUDIO</span></div><div class="sub">Local-first production workspace</div></div><div class="muted">FINOMICS · PRIVATE WORKSPACE</div></header>
 <main>
-<div class="topline"><div><h1>Your production desk.</h1><p>Organise source clips, set in and out points, and export a vertical or landscape MP4.</p></div></div>
+<div class="topline"><div><h1>Your production desk.</h1><p>Trim source clips, mix voiceover and background music, and export a vertical or landscape MP4.</p></div></div>
 <section class="panel" style="margin-bottom:18px">
 <div class="toolbar"><h2>Local API connection</h2><span class="muted">Key stays in this browser tab</span></div>
 <div class="keyline"><input id="apiKey" type="password" autocomplete="off" placeholder="Enter your local API key"><button id="connect">Connect</button></div>
@@ -111,8 +111,23 @@ function renderWorkspace() {
     list.append(item);
   });
   host.append(list);
-  const controls=document.createElement("div"); controls.innerHTML='<div class="row"><div style="flex:1"><label for="profile">Export format</label><select id="profile"><option value="vertical">Vertical · 9:16 · 1080 × 1920</option><option value="landscape">Landscape · 16:9 · 1920 × 1080</option></select></div><div style="width:120px"><label for="fps">Frame rate</label><select id="fps"><option>24</option><option selected>30</option><option>60</option></select></div></div><div class="actions"><button class="primary" id="export">Assemble selected clips</button><button class="secondary" id="refresh">Refresh assets</button></div><div class="status" id="workStatus">Select clips in sequence. Set optional start and end times in seconds beside each clip. Exports are currently silent.</div>';
+  const controls=document.createElement("div"); controls.innerHTML='<div class="row"><div style="flex:1"><label for="profile">Export format</label><select id="profile"><option value="vertical">Vertical · 9:16 · 1080 × 1920</option><option value="landscape">Landscape · 16:9 · 1920 × 1080</option></select></div><div style="width:120px"><label for="fps">Frame rate</label><select id="fps"><option>24</option><option selected>30</option><option>60</option></select></div></div><div class="actions"><button class="primary" id="export">Assemble selected clips</button><button class="secondary" id="refresh">Refresh assets</button></div><div class="status" id="workStatus">Select clips in sequence, set optional in/out points, then choose a voiceover or music track. Music loops to cover the video.</div>';
   host.append(controls);
+  const audioAssets=assets.filter(a=>a.media_type.startsWith("audio/"));
+  for(const [id,label] of [["voiceover","Voiceover"],["music","Background music"]]) {
+    const wrap=document.createElement("div"); wrap.style.marginTop="12px";
+    const title=document.createElement("label"); title.textContent=label; title.htmlFor=id;
+    const select=document.createElement("select"); select.id=id;
+    const none=document.createElement("option"); none.value=""; none.textContent="None"; select.append(none);
+    audioAssets.forEach(asset=>{const option=document.createElement("option");option.value=asset.id;option.textContent=asset.original_name;select.append(option);});
+    wrap.append(title,select); host.append(wrap);
+  }
+  const mix=document.createElement("div"); mix.className="row"; mix.style.marginTop="8px";
+  mix.innerHTML='<div style="flex:1"><label for="voiceVolume">Voiceover volume</label><input id="voiceVolume" type="number" min="0" max="2" step="0.05" value="1"></div><div style="flex:1"><label for="musicVolume">Music volume</label><input id="musicVolume" type="number" min="0" max="2" step="0.05" value="0.18"></div>';
+  host.append(mix);
+  const fades=document.createElement("div"); fades.className="row";
+  fades.innerHTML='<div style="flex:1"><label for="fadeIn">Audio fade in (seconds)</label><input id="fadeIn" type="number" min="0" max="10" step="0.1" value="0.5"></div><div style="flex:1"><label for="fadeOut">Audio fade out (seconds)</label><input id="fadeOut" type="number" min="0" max="10" step="0.1" value="1"></div>';
+  host.append(fades);
   $("export").onclick=exportVideo; $("refresh").onclick=loadAssets;
 }
 async function uploadFiles(event) {
@@ -130,7 +145,7 @@ async function exportVideo() {
   if(!ids.length){workStatus("Choose at least one video clip.",true);return;}
   $("export").disabled=true; workStatus("Rendering MP4. Longer clips may take several minutes...");
   try {
-    const job=await request("/api/v1/projects/"+activeProject.id+"/export-jobs",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({asset_ids:ids,profile:$("profile").value,fps:Number($("fps").value),clip_trims:ids.map(id=>({asset_id:id,start_seconds:Number(document.querySelector('[data-trim-start="'+id+'"]')?.value||0),end_seconds:document.querySelector('[data-trim-end="'+id+'"]')?.value?Number(document.querySelector('[data-trim-end="'+id+'"]')?.value):null}))})});
+    const job=await request("/api/v1/projects/"+activeProject.id+"/export-jobs",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({asset_ids:ids,profile:$("profile").value,fps:Number($("fps").value),clip_trims:ids.map(id=>({asset_id:id,start_seconds:Number(document.querySelector('[data-trim-start="'+id+'"]')?.value||0),end_seconds:document.querySelector('[data-trim-end="'+id+'"]')?.value?Number(document.querySelector('[data-trim-end="'+id+'"]')?.value):null})),audio:{voiceover_asset_id:$("voiceover").value||null,music_asset_id:$("music").value||null,voiceover_volume:Number($("voiceVolume").value),music_volume:Number($("musicVolume").value),fade_in_seconds:Number($("fadeIn").value),fade_out_seconds:Number($("fadeOut").value)}})});
     let current=job;
     while(current.status==="queued" || current.status==="running") {
       workStatus("Export "+current.status+" · "+current.progress+"% complete...");
