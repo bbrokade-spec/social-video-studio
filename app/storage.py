@@ -103,6 +103,7 @@ class LocalStore:
                     visual_prompt TEXT NOT NULL,
                     negative_prompt TEXT NOT NULL DEFAULT '',
                     duration_seconds REAL NOT NULL CHECK(duration_seconds BETWEEN 0.5 AND 30),
+                    asset_id TEXT REFERENCES assets(id) ON DELETE SET NULL,
                     generation_status TEXT NOT NULL DEFAULT 'not_started',
                     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
                     updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
@@ -110,6 +111,9 @@ class LocalStore:
                 )"""
             )
             db.execute("CREATE INDEX IF NOT EXISTS idx_script_plans_project ON script_plans(project_id, updated_at)")
+            scene_columns = {row[1] for row in db.execute("PRAGMA table_info(script_scenes)")}
+            if "asset_id" not in scene_columns:
+                db.execute("ALTER TABLE script_scenes ADD COLUMN asset_id TEXT REFERENCES assets(id) ON DELETE SET NULL")
             db.execute("CREATE INDEX IF NOT EXISTS idx_script_scenes_plan ON script_scenes(plan_id, position)")
 
 
