@@ -66,3 +66,29 @@ def test_export_job_persists_transition_settings(tmp_path):
         "transition": {"type": "crossfade", "duration_seconds": 0.8},
     })
     assert job["transition"] == {"type": "crossfade", "duration_seconds": 0.8}
+
+def test_crossfade_shortens_audio_timeline_to_match_video(tmp_path, monkeypatch):
+    clips = [tmp_path / "one.mp4", tmp_path / "two.mp4"]
+    music = tmp_path / "music.mp3"
+    output = tmp_path / "mixed-crossfade.mp4"
+    for path in [*clips, music]:
+        path.write_bytes(b"media")
+    monkeypatch.setattr(media.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(media, "probe_media", lambda path: {"format": {"duration": "8"}})
+    captured = []
+
+    def fake_run(command, **kwargs):
+        captured.append(command)
+        output.write_bytes(b"rendered")
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(media.subprocess, "run", fake_run)
+    media.assemble_video(
+        clips, output, music_path=music, transition_type="crossfade",
+        transition_duration_seconds=1.0,
+    )
+    command = captured[0]
+    duration_index = command.index("-t")
+    assert command[duration_index + 1] == "15.000"
+    graph = command[command.index("-filter_complex") + 1]
+    assert "atrim=duration=15.000" in graph
