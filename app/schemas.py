@@ -117,6 +117,11 @@ class SubtitleSettings(BaseModel):
     position: Literal["bottom", "center"] = "bottom"
 
 
+class TransitionSettings(BaseModel):
+    type: Literal["cut", "crossfade"] = "cut"
+    duration_seconds: float = Field(default=0.5, ge=0.2, le=2.5)
+
+
 class MediaExportRequest(BaseModel):
     asset_ids: list[str] = Field(min_length=1, max_length=50)
     profile: Literal["vertical", "landscape"] = "vertical"
@@ -124,6 +129,7 @@ class MediaExportRequest(BaseModel):
     clip_trims: list[ClipTrim] | None = None
     audio: AudioMixSettings | None = None
     subtitles: SubtitleSettings | None = None
+    transition: TransitionSettings = Field(default_factory=TransitionSettings)
 
     @model_validator(mode="after")
     def validate_clip_trims(self):
