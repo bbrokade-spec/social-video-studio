@@ -5,7 +5,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, HTTPException, Security, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from starlette.concurrency import run_in_threadpool
 from fastapi.security.api_key import APIKeyHeader
 
@@ -116,6 +116,12 @@ async def _run_image_to_video(image_request: ImageRequest, video_request):
         image=image_file,
         video=video_result["output"],
     )
+
+
+@app.get("/", response_class=HTMLResponse, include_in_schema=False)
+async def studio_home():
+    interface = Path(__file__).parent / "static" / "index.html"
+    return HTMLResponse(interface.read_text(encoding="utf-8"))
 
 
 @app.get("/health")
