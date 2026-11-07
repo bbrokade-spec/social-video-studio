@@ -73,6 +73,8 @@ def assemble_video(
     subtitles_path: str | Path | None = None,
     subtitle_style: Literal["classic", "bold", "yellow"] = "classic",
     subtitle_position: Literal["bottom", "center"] = "bottom",
+    transition_type: Literal["cut", "crossfade"] = "cut",
+    transition_duration_seconds: float = 0.5,
 ) -> Path:
     """Normalize and concatenate local video clips into an H.264 MP4.
 
@@ -127,6 +129,12 @@ def assemble_video(
         raise MediaError("Subtitle source must be an existing SRT file.")
     if subtitle_style not in {"classic", "bold", "yellow"} or subtitle_position not in {"bottom", "center"}:
         raise MediaError("Unsupported subtitle style or position.")
+    if transition_type not in {"cut", "crossfade"}:
+        raise MediaError("Unsupported clip transition.")
+    if not math.isfinite(transition_duration_seconds) or not 0.2 <= transition_duration_seconds <= 2.5:
+        raise MediaError("Transition duration must be between 0.2 and 2.5 seconds.")
+    if transition_type == "crossfade" and len(sources) < 2:
+        raise MediaError("Crossfade requires at least two clips.")
 
     width, height = PROFILES[profile]
     command = [_executable("ffmpeg"), "-hide_banner", "-loglevel", "error", "-y"]
@@ -141,19 +149,25 @@ def assemble_video(
     audio_input_indices = []
     music_duration = None
     timeline_duration = None
-    if voiceover_path is not None or music_path is not None:
-        timeline_duration = 0.0
+    clip_durations = None
+    if voiceover_path is not None or music_path is not None or transition_type == "crossfade":
+        clip_durations = []
         for source, trim in zip(sources, normalized_trims):
             metadata = probe_media(source)
             try:
                 source_duration = float(metadata["format"]["duration"])
             except (KeyError, TypeError, ValueError) as exc:
-                raise MediaError("Could not determine a source clip duration for music mixing.") from exc
+                raise MediaError("Could not determine a source clip duration for export timing.") from exc
             start, end = trim if trim is not None else (0.0, None)
             clip_duration = min(end - start, source_duration - start) if end is not None else source_duration - start
             if not math.isfinite(clip_duration) or clip_duration <= 0:
                 raise MediaError("A clip trim range exceeds the source clip duration.")
-            timeline_duration += clip_duration
+            clip_durations.append(clip_duration)
+        timeline_duration = sum(clip_durations)
+        if transition_type == "crossfade":
+            if any(duration <= transition_duration_seconds for duration in clip_durations):
+                raise MediaError("Each clip must be longer than the selected crossfade duration.")
+            timeline_duration -= transition_duration_seconds * (len(sources) - 1)
         if music_path is not None:
             music_duration = timeline_duration
     for audio_path, is_music in ((voiceover_path, False), (music_path, True)):
@@ -171,13 +185,26 @@ def assemble_video(
         filters.append(
             f"[{index}:v:0]scale={width}:{height}:force_original_aspect_ratio=decrease,"
             f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={fps},"
-            f"format=yuv420p[{label}]"
+            f"format=yuv420p,settb=AVTB,setpts=PTS-STARTPTS[{label}]"
         )
         labels.append(f"[{label}]")
     video_output_label = "vconcat"
-    filters.append(
-        "".join(labels) + f"concat=n={len(sources)}:v=1:a=0[{video_output_label}]"
-    )
+    if transition_type == "crossfade":
+        previous_label = labels[0][1:-1]
+        elapsed = clip_durations[0]
+        for index in range(1, len(sources)):
+            next_label = f"vx{index}"
+            offset = elapsed - transition_duration_seconds
+            filters.append(
+                f"[{previous_label}][v{index}]xfade=transition=fade:duration={transition_duration_seconds:.3f}:offset={offset:.3f}[{next_label}]"
+            )
+            previous_label = next_label
+            elapsed += clip_durations[index] - transition_duration_seconds
+        filters.append(f"[{previous_label}]null[{video_output_label}]")
+    else:
+        filters.append(
+            "".join(labels) + f"concat=n={len(sources)}:v=1:a=0[{video_output_label}]"
+        )
     if subtitle_source is not None:
         style_map = {
             "classic": "FontName=Arial,FontSize=32,PrimaryColour=&H00FFFFFF,Outline=2,Shadow=1",
