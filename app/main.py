@@ -3,6 +3,7 @@ import asyncio
 from contextlib import asynccontextmanager
 import hashlib
 import secrets
+import re
 import uuid
 from pathlib import Path
 
@@ -415,6 +416,7 @@ _ALLOWED_UPLOADS = {
     ".mp3": {"audio/mpeg"},
     ".wav": {"audio/wav", "audio/x-wav"},
     ".m4a": {"audio/mp4", "audio/x-m4a"},
+    ".srt": {"text/plain", "application/x-subrip"},
 }
 
 
@@ -439,7 +441,21 @@ def _matches_media_signature(extension: str, header: bytes) -> bool:
         return header.startswith(b"ID3") or (
             len(header) >= 2 and header[0] == 0xFF and header[1] & 0xE0 == 0xE0
         )
+    if extension == ".srt":
+        return True  # Full UTF-8 and cue validation is performed after the upload is written.
     return False
+
+
+def _validate_srt_file(path: Path) -> bool:
+    try:
+        content = path.read_text(encoding="utf-8-sig")
+    except (OSError, UnicodeDecodeError):
+        return False
+    if not content.strip() or "\x00" in content or len(content) > 5 * 1024 * 1024:
+        return False
+    timestamp = re.compile(r"(?m)^\s*\d{2}:\d{2}:\d{2},\d{3}\s+-->\s+\d{2}:\d{2}:\d{2},\d{3}(?:\s+.*)?$")
+    cues = timestamp.findall(content)
+    return bool(cues) and len(cues) <= 10000
 
 
 @app.post(
@@ -511,6 +527,8 @@ async def upload_project_asset(project_id: str, file: UploadFile = File(...)):
             raise HTTPException(400, "Uploaded file is empty.")
         if not _matches_media_signature(extension, header):
             raise HTTPException(415, "File content does not match its declared media type.")
+        if extension == ".srt" and not _validate_srt_file(temporary_path):
+            raise HTTPException(415, "Subtitle file is not a valid UTF-8 SRT file or exceeds subtitle limits.")
 
         temporary_path.replace(final_path)
         asset = store.register_asset({
