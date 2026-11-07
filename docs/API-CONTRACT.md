@@ -41,6 +41,10 @@ The request body uses named JSON properties:
 
 The 200 response contains an `output` property referencing Gradio FileData. The current adapter treats this endpoint as a direct response rather than an event-ID endpoint, based on the supplied OpenAPI response schema.
 
+## Combined pipeline
+
+`POST /api/v1/pipelines/image-to-video` submits Z-Image generation, waits for the SSE completion event, extracts the first FileData image with a URL, and sends that URL to Wan 2.2. The route waits synchronously for both provider operations. It is suitable for controlled testing, not yet a durable production job queue.
+
 ## Production requirements
 
 Before public deployment:
