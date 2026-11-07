@@ -222,7 +222,8 @@ def _process_next_export_job() -> bool:
         trim_ranges = [(item["start_seconds"], item.get("end_seconds")) for item in job.get("clip_trims", [])] or None
         audio_options = _resolve_audio_options(store, job["project_id"], job.get("audio"))
         subtitle_options = _resolve_subtitle_options(store, job["project_id"], job.get("subtitles"))
-        assemble_video(selected, output_path, profile=job["profile"], fps=job["fps"], trim_ranges=trim_ranges, **audio_options, **subtitle_options)
+        transition_options = job.get("transition") or {"type": "cut", "duration_seconds": 0.5}
+        assemble_video(selected, output_path, profile=job["profile"], fps=job["fps"], trim_ranges=trim_ranges, transition_type=transition_options.get("type", "cut"), transition_duration_seconds=transition_options.get("duration_seconds", 0.5), **audio_options, **subtitle_options)
 
         digest = hashlib.sha256()
         with output_path.open("rb") as rendered:
@@ -304,6 +305,7 @@ async def create_project_export_job(project_id: str, request: ExportJobCreateReq
         "clip_trims": [item.model_dump() for item in request.clip_trims] if request.clip_trims else [],
         "audio": audio_data,
         "subtitles": subtitle_data,
+        "transition": request.transition.model_dump(),
         "profile": request.profile,
         "fps": request.fps,
     })
@@ -648,6 +650,8 @@ async def export_project_video(project_id: str, request: MediaExportRequest):
             profile=request.profile,
             fps=request.fps,
             trim_ranges=[(item.start_seconds, item.end_seconds) for item in request.clip_trims] if request.clip_trims else None,
+            transition_type=request.transition.type,
+            transition_duration_seconds=request.transition.duration_seconds,
             **_resolve_audio_options(store, project_id, request.audio.model_dump(exclude_none=True) if request.audio else {}),
             **_resolve_subtitle_options(store, project_id, request.subtitles.model_dump() if request.subtitles else {}),
         )
