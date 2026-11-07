@@ -98,17 +98,15 @@ def _wan_payload(input_image: str, video) -> dict:
 
 
 async def _run_image_to_video(image_request: ImageRequest, video_request):
-    # Submit image job using the six positional inputs from the Z-Image OpenAPI schema.
+    # Send the named JSON fields documented by the live Z-Image OpenAPI schema.
     event_id = await submit_zimage(
         {
-            "data": [
-                image_request.prompt,
-                image_request.resolution,
-                image_request.seed,
-                image_request.steps,
-                image_request.shift,
-                image_request.random_seed,
-            ]
+            "prompt": image_request.prompt,
+            "resolution": image_request.resolution,
+            "seed": image_request.seed,
+            "steps": image_request.steps,
+            "shift": image_request.shift,
+            "random_seed": image_request.random_seed,
         }
     )
 
@@ -486,14 +484,12 @@ async def providers():
 async def create_image(request: ImageRequest):
     event_id = await submit_zimage(
         {
-            "data": [
-                request.prompt,
-                request.resolution,
-                request.seed,
-                request.steps,
-                request.shift,
-                request.random_seed,
-            ]
+            "prompt": request.prompt,
+            "resolution": request.resolution,
+            "seed": request.seed,
+            "steps": request.steps,
+            "shift": request.shift,
+            "random_seed": request.random_seed,
         }
     )
     return ImageJobSubmitResponse(
