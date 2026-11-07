@@ -36,6 +36,8 @@ from .schemas import (
     MediaExportRequest,
     ExportJobCreateRequest,
     ExportJobResponse,
+    ScriptPlanCreateRequest,
+    ScriptPlanResponse,
 )
 
 _export_worker_task: asyncio.Task | None = None
@@ -325,6 +327,119 @@ async def read_export_job(job_id: str):
     if not job:
         raise HTTPException(404, "Export job not found.")
     return job
+
+
+@app.post(
+    "/api/v1/projects/{project_id}/script-plans",
+    response_model=ScriptPlanResponse,
+    status_code=201,
+    dependencies=[Depends(require_api_key)],
+)
+async def create_script_plan(project_id: str, request: ScriptPlanCreateRequest):
+    try:
+        project_id = str(uuid.UUID(project_id))
+    except ValueError as exc:
+        raise HTTPException(404, "Project not found.") from exc
+    store = _store()
+    if not store.get_project(project_id):
+        raise HTTPException(404, "Project not found.")
+    plan_id = str(uuid.uuid4())
+    scenes = [
+        {
+            "id": str(uuid.uuid4()),
+            "position": index,
+            **scene.model_dump(),
+        }
+        for index, scene in enumerate(request.scenes)
+    ]
+    try:
+        return store.create_script_plan({
+            "id": plan_id,
+            "project_id": project_id,
+            "title": request.title,
+            "full_script": request.full_script,
+            "output_profile": request.output_profile,
+            "scenes": scenes,
+        })
+    except StorageError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.get(
+    "/api/v1/projects/{project_id}/script-plans",
+    response_model=list[ScriptPlanResponse],
+    dependencies=[Depends(require_api_key)],
+)
+async def list_project_script_plans(project_id: str):
+    try:
+        project_id = str(uuid.UUID(project_id))
+    except ValueError as exc:
+        raise HTTPException(404, "Project not found.") from exc
+    store = _store()
+    if not store.get_project(project_id):
+        raise HTTPException(404, "Project not found.")
+    return store.list_script_plans(project_id)
+
+
+@app.get(
+    "/api/v1/script-plans/{plan_id}",
+    response_model=ScriptPlanResponse,
+    dependencies=[Depends(require_api_key)],
+)
+async def read_script_plan(plan_id: str):
+    try:
+        plan_id = str(uuid.UUID(plan_id))
+    except ValueError as exc:
+        raise HTTPException(404, "Script plan not found.") from exc
+    plan = _store().get_script_plan(plan_id)
+    if not plan:
+        raise HTTPException(404, "Script plan not found.")
+    return plan
+
+
+@app.put(
+    "/api/v1/script-plans/{plan_id}",
+    response_model=ScriptPlanResponse,
+    dependencies=[Depends(require_api_key)],
+)
+async def replace_script_plan(plan_id: str, request: ScriptPlanCreateRequest):
+    try:
+        plan_id = str(uuid.UUID(plan_id))
+    except ValueError as exc:
+        raise HTTPException(404, "Script plan not found.") from exc
+    scenes = [
+        {
+            "id": str(uuid.uuid4()),
+            "position": index,
+            **scene.model_dump(),
+        }
+        for index, scene in enumerate(request.scenes)
+    ]
+    plan = _store().update_script_plan(plan_id, {
+        "title": request.title,
+        "full_script": request.full_script,
+        "output_profile": request.output_profile,
+        "scenes": scenes,
+    })
+    if not plan:
+        raise HTTPException(404, "Script plan not found.")
+    return plan
+
+
+@app.delete(
+    "/api/v1/script-plans/{plan_id}",
+    status_code=204,
+    dependencies=[Depends(require_api_key)],
+)
+async def remove_script_plan(plan_id: str):
+    try:
+        plan_id = str(uuid.UUID(plan_id))
+    except ValueError as exc:
+        raise HTTPException(404, "Script plan not found.") from exc
+    if not _store().delete_script_plan(plan_id):
+        raise HTTPException(404, "Script plan not found.")
+    return None
+
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 async def studio_home():
