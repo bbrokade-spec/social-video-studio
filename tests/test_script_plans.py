@@ -83,3 +83,31 @@ def test_script_plan_rejects_unknown_project(tmp_path):
         assert "Project does not exist" in str(exc)
     else:
         raise AssertionError("Expected missing project to be rejected")
+
+
+
+def test_scene_image_asset_assignment_persists_across_reopen_and_update(tmp_path):
+    store = LocalStore(tmp_path / "studio-data")
+    store.create_project("project-1", "FINOMICS test")
+    store.register_asset({
+        "id": "image-1",
+        "project_id": "project-1",
+        "original_name": "scene-one.png",
+        "stored_name": "image-1.png",
+        "media_type": "image/png",
+        "size_bytes": 128,
+        "sha256": "a" * 64,
+    })
+    plan = sample_plan()
+    plan["scenes"][0]["asset_id"] = "image-1"
+    created = store.create_script_plan(plan)
+    assert created["scenes"][0]["asset_id"] == "image-1"
+
+    reopened = LocalStore(tmp_path / "studio-data")
+    loaded = reopened.get_script_plan("plan-1")
+    assert loaded["scenes"][0]["asset_id"] == "image-1"
+
+    updated = sample_plan()
+    updated["scenes"][0]["asset_id"] = "image-1"
+    result = reopened.update_script_plan("plan-1", updated)
+    assert result["scenes"][0]["asset_id"] == "image-1"
