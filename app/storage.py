@@ -52,6 +52,25 @@ class LocalStore:
             db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_assets_project ON assets(project_id, created_at)"
             )
+            db.execute(
+                """CREATE TABLE IF NOT EXISTS export_jobs (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                    asset_ids_json TEXT NOT NULL,
+                    profile TEXT NOT NULL CHECK(profile IN ('vertical', 'landscape')),
+                    fps INTEGER NOT NULL CHECK(fps BETWEEN 1 AND 60),
+                    status TEXT NOT NULL CHECK(status IN ('queued', 'running', 'completed', 'failed')),
+                    progress INTEGER NOT NULL DEFAULT 0 CHECK(progress BETWEEN 0 AND 100),
+                    result_asset_id TEXT REFERENCES assets(id),
+                    error_message TEXT,
+                    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+                    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+                )"""
+            )
+            db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_export_jobs_status ON export_jobs(status, created_at)"
+            )
+
 
     def create_project(self, project_id: str, title: str) -> dict[str, Any]:
         with self._connect() as db:
@@ -105,3 +124,67 @@ class LocalStore:
         with self._connect() as db:
             row = db.execute("SELECT * FROM assets WHERE id = ?", (asset_id,)).fetchone()
         return dict(row) if row else None
+
+    def create_export_job(self, job: dict[str, Any]) -> dict[str, Any]:
+        import json
+        with self._connect() as db:
+            db.execute(
+                """INSERT INTO export_jobs
+                (id, project_id, asset_ids_json, profile, fps, status)
+                VALUES (?, ?, ?, ?, ?, 'queued')""",
+                (job["id"], job["project_id"], json.dumps(job["asset_ids"]), job["profile"], job["fps"]),
+            )
+            row = db.execute("SELECT * FROM export_jobs WHERE id = ?", (job["id"],)).fetchone()
+        return self._job_dict(row)
+
+    @staticmethod
+    def _job_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
+        import json
+        if row is None:
+            return None
+        result = dict(row)
+        result["asset_ids"] = json.loads(result.pop("asset_ids_json"))
+        return result
+
+    def get_export_job(self, job_id: str) -> dict[str, Any] | None:
+        with self._connect() as db:
+            row = db.execute("SELECT * FROM export_jobs WHERE id = ?", (job_id,)).fetchone()
+        return self._job_dict(row)
+
+    def recover_interrupted_jobs(self) -> int:
+        with self._connect() as db:
+            cursor = db.execute(
+                """UPDATE export_jobs SET status = 'queued', progress = 0,
+                error_message = NULL,
+                updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+                WHERE status = 'running'"""
+            )
+            return cursor.rowcount
+
+    def claim_next_export_job(self) -> dict[str, Any] | None:
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT * FROM export_jobs WHERE status = 'queued' ORDER BY created_at LIMIT 1"
+            ).fetchone()
+            if row is None:
+                return None
+            db.execute(
+                """UPDATE export_jobs SET status = 'running', progress = 5,
+                updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?""",
+                (row["id"],),
+            )
+            claimed = db.execute("SELECT * FROM export_jobs WHERE id = ?", (row["id"],)).fetchone()
+        return self._job_dict(claimed)
+
+    def update_export_job(self, job_id: str, *, status: str, progress: int,
+                          result_asset_id: str | None = None,
+                          error_message: str | None = None) -> None:
+        with self._connect() as db:
+            db.execute(
+                """UPDATE export_jobs SET status = ?, progress = ?,
+                result_asset_id = ?, error_message = ?,
+                updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+                WHERE id = ?""",
+                (status, progress, result_asset_id, error_message, job_id),
+            )
