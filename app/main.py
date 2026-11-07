@@ -173,6 +173,25 @@ def _resolve_audio_options(store: LocalStore, project_id: str, audio: dict | Non
     return resolved
 
 
+def _resolve_subtitle_options(store: LocalStore, project_id: str, subtitles: dict | None) -> dict:
+    if not subtitles:
+        return {}
+    asset = next((item for item in store.list_assets(project_id) if item["id"] == subtitles.get("asset_id")), None)
+    if not asset or not asset["original_name"].lower().endswith(".srt") or asset["media_type"] not in {"text/plain", "application/x-subrip"}:
+        raise MediaError("Selected subtitle asset is missing or is not a supported SRT file.")
+    stored_name = asset["stored_name"]
+    if Path(stored_name).name != stored_name:
+        raise MediaError("Stored subtitle metadata is invalid.")
+    source = (store.asset_dir / stored_name).resolve()
+    if source.parent != store.asset_dir.resolve() or not source.is_file() or not _validate_srt_file(source):
+        raise MediaError("Selected subtitle file is missing or invalid.")
+    return {
+        "subtitles_path": source,
+        "subtitle_style": subtitles.get("style", "classic"),
+        "subtitle_position": subtitles.get("position", "bottom"),
+    }
+
+
 def _process_next_export_job() -> bool:
     store = _store()
     job = store.claim_next_export_job()
@@ -202,7 +221,8 @@ def _process_next_export_job() -> bool:
         output_path = store.asset_dir / stored_name
         trim_ranges = [(item["start_seconds"], item.get("end_seconds")) for item in job.get("clip_trims", [])] or None
         audio_options = _resolve_audio_options(store, job["project_id"], job.get("audio"))
-        assemble_video(selected, output_path, profile=job["profile"], fps=job["fps"], trim_ranges=trim_ranges, **audio_options)
+        subtitle_options = _resolve_subtitle_options(store, job["project_id"], job.get("subtitles"))
+        assemble_video(selected, output_path, profile=job["profile"], fps=job["fps"], trim_ranges=trim_ranges, **audio_options, **subtitle_options)
 
         digest = hashlib.sha256()
         with output_path.open("rb") as rendered:
@@ -273,6 +293,8 @@ async def create_project_export_job(project_id: str, request: ExportJobCreateReq
     audio_data = request.audio.model_dump(exclude_none=True) if request.audio else {}
     try:
         _resolve_audio_options(store, project_id, audio_data)
+        subtitle_data = request.subtitles.model_dump() if request.subtitles else {}
+        _resolve_subtitle_options(store, project_id, subtitle_data)
     except MediaError as exc:
         raise HTTPException(422, str(exc)) from exc
     return store.create_export_job({
@@ -281,6 +303,7 @@ async def create_project_export_job(project_id: str, request: ExportJobCreateReq
         "asset_ids": request.asset_ids,
         "clip_trims": [item.model_dump() for item in request.clip_trims] if request.clip_trims else [],
         "audio": audio_data,
+        "subtitles": subtitle_data,
         "profile": request.profile,
         "fps": request.fps,
     })
@@ -626,6 +649,7 @@ async def export_project_video(project_id: str, request: MediaExportRequest):
             fps=request.fps,
             trim_ranges=[(item.start_seconds, item.end_seconds) for item in request.clip_trims] if request.clip_trims else None,
             **_resolve_audio_options(store, project_id, request.audio.model_dump(exclude_none=True) if request.audio else {}),
+            **_resolve_subtitle_options(store, project_id, request.subtitles.model_dump() if request.subtitles else {}),
         )
         digest = hashlib.sha256()
         with output_path.open("rb") as rendered:
