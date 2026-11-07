@@ -15,6 +15,7 @@ from fastapi.security.api_key import APIKeyHeader
 from .config import settings
 from .storage import LocalStore, StorageError
 from .media import MediaError, assemble_video
+from .wan_queue import generate_wan_from_local_image, download_wan_video
 from .hf_gradio import (
     _find_filedata,
     _validate_public_image_url,
@@ -451,6 +452,75 @@ async def remove_script_plan(plan_id: str):
     if not _store().delete_script_plan(plan_id):
         raise HTTPException(404, "Script plan not found.")
     return None
+
+
+@app.post(
+    "/api/v1/script-plans/{plan_id}/scenes/{position}/generate-video",
+    response_model=AssetResponse,
+    dependencies=[Depends(require_api_key)],
+)
+async def generate_script_scene_video(plan_id: str, position: int):
+    """Generate and persist a Wan image-to-video clip for one saved script scene."""
+    try:
+        plan_id = str(uuid.UUID(plan_id))
+    except ValueError as exc:
+        raise HTTPException(404, "Script plan not found.") from exc
+    if position < 0 or position >= 100:
+        raise HTTPException(404, "Scene not found.")
+    store = _store()
+    plan = store.get_script_plan(plan_id)
+    if not plan:
+        raise HTTPException(404, "Script plan not found.")
+    scene = next((item for item in plan["scenes"] if item["position"] == position), None)
+    if not scene:
+        raise HTTPException(404, "Scene not found.")
+    if not scene.get("asset_id"):
+        raise HTTPException(422, "Assign and save an image for this scene before generating its video.")
+    image_asset = store.get_asset(scene["asset_id"])
+    if not image_asset or image_asset["project_id"] != plan["project_id"] or not image_asset["media_type"].startswith("image/"):
+        raise HTTPException(422, "The saved scene image is unavailable.")
+    stored_name = image_asset["stored_name"]
+    if Path(stored_name).name != stored_name:
+        raise HTTPException(500, "Stored image metadata is invalid.")
+    image_path = (store.asset_dir / stored_name).resolve()
+    if image_path.parent != store.asset_dir.resolve() or not image_path.is_file():
+        raise HTTPException(404, "The saved scene image file is missing.")
+
+    generated = await generate_wan_from_local_image(
+        image_path,
+        prompt=scene["visual_prompt"],
+        negative_prompt=scene.get("negative_prompt", ""),
+        duration_seconds=min(max(float(scene["duration_seconds"]), 2.0), 5.0),
+        steps=4,
+        guidance_scale=1.0,
+        guidance_scale_2=1.0,
+        seed=42,
+        randomize_seed=True,
+    )
+    video_bytes = await download_wan_video(generated["url"], max_bytes=settings.max_upload_bytes)
+    asset_id = str(uuid.uuid4())
+    stored_name = f"{asset_id}.mp4"
+    output_path = store.asset_dir / stored_name
+    digest = hashlib.sha256(video_bytes).hexdigest()
+    try:
+        with output_path.open("xb") as output:
+            output.write(video_bytes)
+        asset = store.register_asset({
+            "id": asset_id,
+            "project_id": plan["project_id"],
+            "original_name": f"scene-{position + 1}-wan-generated.mp4",
+            "stored_name": stored_name,
+            "media_type": "video/mp4",
+            "size_bytes": len(video_bytes),
+            "sha256": digest,
+        })
+    except (OSError, StorageError) as exc:
+        output_path.unlink(missing_ok=True)
+        raise HTTPException(500, "Could not save the generated scene video.") from exc
+    return {key: asset[key] for key in (
+        "id", "project_id", "original_name", "media_type",
+        "size_bytes", "sha256", "created_at"
+    )}
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
