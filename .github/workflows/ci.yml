@@ -20,3 +20,19 @@ jobs:
         run: python -m compileall -q app tests
       - name: Run tests
         run: python -m pytest -q
+
+  windows-script-syntax:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse Windows PowerShell helpers
+        shell: pwsh
+        run: |
+          Get-ChildItem scripts/*.ps1 | ForEach-Object {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$errors) > $null
+            if ($errors.Count -gt 0) {
+              $errors | Out-String | Write-Error
+            }
+          }
