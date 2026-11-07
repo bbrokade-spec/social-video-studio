@@ -54,10 +54,10 @@ def test_assemble_video_builds_landscape_export_command(tmp_path, monkeypatch):
     "clips, profile, fps",
     [
         ([], "vertical", 30),
-        ([\"missing.mp4\"], "vertical", 30),
-        ([\"missing.mp4\"] * 51, "vertical", 30),
-        ([\"missing.mp4\"], "square", 30),
-        ([\"missing.mp4\"], "vertical", 0),
+        (["missing.mp4"], "vertical", 30),
+        (["missing.mp4"] * 51, "vertical", 30),
+        (["missing.mp4"], "square", 30),
+        (["missing.mp4"], "vertical", 0),
     ],
 )
 def test_assemble_video_rejects_invalid_requests(tmp_path, clips, profile, fps):
@@ -73,7 +73,7 @@ def test_assemble_video_rejects_invalid_requests(tmp_path, clips, profile, fps):
 def test_assemble_video_requires_mp4_output_and_existing_directory(tmp_path):
     clip = tmp_path / "clip.mp4"
     clip.write_bytes(b"clip")
-    with pytest.raises(media.MediaError, match="\.mp4"):
+    with pytest.raises(media.MediaError, match=r"\.mp4"):
         media.assemble_video([clip], tmp_path / "out.mov")
     with pytest.raises(media.MediaError, match="directory"):
         media.assemble_video([clip], tmp_path / "missing" / "out.mp4")
