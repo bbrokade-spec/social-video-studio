@@ -1,7 +1,10 @@
 from urllib.parse import urljoin
+import hashlib
 import secrets
+import uuid
+from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, Security
+from fastapi import Depends, FastAPI, File, HTTPException, Security, UploadFile
 from fastapi.security.api_key import APIKeyHeader
 
 from .config import settings
