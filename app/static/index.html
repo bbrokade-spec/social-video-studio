@@ -20,7 +20,7 @@ button:hover{background:#254b73}button:disabled{opacity:.5;cursor:wait}.primary{
 .project-list{display:grid;gap:8px;margin-top:14px}.project{width:100%;text-align:left;background:#0d1520;border-color:#2b3a4e;padding:12px}.project.active{border-color:#65adff;background:#13253a}.project strong{display:block;font-size:13px}.project small{color:#8fa1b7;font-size:11px}
 .toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:15px}.toolbar h2{margin:0}
 .drop{border:1px dashed #405673;background:#0d1520;border-radius:12px;padding:18px;text-align:center;margin:15px 0}.drop input{border:0;padding:8px;background:transparent}
-.asset-list{display:grid;gap:9px;margin:15px 0}.asset{display:flex;align-items:center;gap:10px;padding:12px;background:#0c1420;border:1px solid #26364a;border-radius:10px}.asset input{width:auto}.asset-name{font-size:13px;overflow-wrap:anywhere;flex:1}.asset-meta{font-size:11px;color:#91a1b6;margin-top:3px}
+.asset-list{display:grid;gap:9px;margin:15px 0}.asset{display:flex;align-items:center;gap:10px;padding:12px;background:#0c1420;border:1px solid #26364a;border-radius:10px}.asset input{width:auto}.asset-name{font-size:13px;overflow-wrap:anywhere;flex:1}.asset-meta{font-size:11px;color:#91a1b6;margin-top:3px}.trim-fields{display:flex;gap:6px;width:190px}.trim-fields input{min-width:0;width:50%;padding:7px;font-size:12px}
 .actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:15px}.status{min-height:20px;font-size:12px;color:#a9c8eb;margin-top:12px}.error{color:#ff9e9e}.empty{padding:28px 10px;text-align:center;color:#8293a9;font-size:13px}
 .keyline{display:flex;gap:8px;align-items:center}.keyline input{flex:1}.keyline button{padding:9px 12px}
 footer{color:#65778e;text-align:center;font-size:11px;padding:22px}
@@ -30,7 +30,7 @@ footer{color:#65778e;text-align:center;font-size:11px;padding:22px}
 <body>
 <header><div><div class="brand">SOCIAL VIDEO <span>STUDIO</span></div><div class="sub">Local-first production workspace</div></div><div class="muted">FINOMICS · PRIVATE WORKSPACE</div></header>
 <main>
-<div class="topline"><div><h1>Your production desk.</h1><p>Organise source clips, assemble a cut, and export a vertical or landscape MP4.</p></div></div>
+<div class="topline"><div><h1>Your production desk.</h1><p>Organise source clips, set in and out points, and export a vertical or landscape MP4.</p></div></div>
 <section class="panel" style="margin-bottom:18px">
 <div class="toolbar"><h2>Local API connection</h2><span class="muted">Key stays in this browser tab</span></div>
 <div class="keyline"><input id="apiKey" type="password" autocomplete="off" placeholder="Enter your local API key"><button id="connect">Connect</button></div>
@@ -101,10 +101,17 @@ function renderWorkspace() {
     const info=document.createElement("div"); info.className="asset-name";
     const name=document.createElement("div"); name.textContent=asset.original_name;
     const meta=document.createElement("div"); meta.className="asset-meta"; meta.textContent=asset.media_type+" · "+bytes(asset.size_bytes);
-    info.append(name,meta); item.append(check,info); list.append(item);
+    info.append(name,meta); item.append(check,info);
+    if(asset.media_type.startsWith("video/")) {
+      const trim=document.createElement("div"); trim.className="trim-fields";
+      const start=document.createElement("input"); start.type="number"; start.min="0"; start.step="0.1"; start.value="0"; start.title="Start time in seconds"; start.setAttribute("aria-label","Start seconds for "+asset.original_name); start.dataset.trimStart=asset.id;
+      const end=document.createElement("input"); end.type="number"; end.min="0.1"; end.step="0.1"; end.placeholder="End (optional)"; end.title="End time in seconds, leave blank for end of clip"; end.setAttribute("aria-label","End seconds for "+asset.original_name); end.dataset.trimEnd=asset.id;
+      trim.append(start,end); item.append(trim);
+    }
+    list.append(item);
   });
   host.append(list);
-  const controls=document.createElement("div"); controls.innerHTML='<div class="row"><div style="flex:1"><label for="profile">Export format</label><select id="profile"><option value="vertical">Vertical · 9:16 · 1080 × 1920</option><option value="landscape">Landscape · 16:9 · 1920 × 1080</option></select></div><div style="width:120px"><label for="fps">Frame rate</label><select id="fps"><option>24</option><option selected>30</option><option>60</option></select></div></div><div class="actions"><button class="primary" id="export">Assemble selected clips</button><button class="secondary" id="refresh">Refresh assets</button></div><div class="status" id="workStatus">Select at least one video clip to export. Exports are currently silent. Jobs continue in the background and survive app restarts.</div>';
+  const controls=document.createElement("div"); controls.innerHTML='<div class="row"><div style="flex:1"><label for="profile">Export format</label><select id="profile"><option value="vertical">Vertical · 9:16 · 1080 × 1920</option><option value="landscape">Landscape · 16:9 · 1920 × 1080</option></select></div><div style="width:120px"><label for="fps">Frame rate</label><select id="fps"><option>24</option><option selected>30</option><option>60</option></select></div></div><div class="actions"><button class="primary" id="export">Assemble selected clips</button><button class="secondary" id="refresh">Refresh assets</button></div><div class="status" id="workStatus">Select clips in sequence. Set optional start and end times in seconds beside each clip. Exports are currently silent.</div>';
   host.append(controls);
   $("export").onclick=exportVideo; $("refresh").onclick=loadAssets;
 }
@@ -123,7 +130,7 @@ async function exportVideo() {
   if(!ids.length){workStatus("Choose at least one video clip.",true);return;}
   $("export").disabled=true; workStatus("Rendering MP4. Longer clips may take several minutes...");
   try {
-    const job=await request("/api/v1/projects/"+activeProject.id+"/export-jobs",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({asset_ids:ids,profile:$("profile").value,fps:Number($("fps").value)})});
+    const job=await request("/api/v1/projects/"+activeProject.id+"/export-jobs",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({asset_ids:ids,profile:$("profile").value,fps:Number($("fps").value),clip_trims:ids.map(id=>({asset_id:id,start_seconds:Number(document.querySelector('[data-trim-start="'+id+'"]')?.value||0),end_seconds:document.querySelector('[data-trim-end="'+id+'"]')?.value?Number(document.querySelector('[data-trim-end="'+id+'"]')?.value):null}))})});
     let current=job;
     while(current.status==="queued" || current.status==="running") {
       workStatus("Export "+current.status+" · "+current.progress+"% complete...");
