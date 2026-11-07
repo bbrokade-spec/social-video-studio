@@ -54,6 +54,14 @@ Use the approved branch or pull request containing the features you want to test
 
 ### 3. Create the Python environment
 
+You can run the setup helper, which creates the virtual environment, installs requirements, copies `.env.example` when needed and creates the local data directory:
+
+```powershell
+.\\scripts\\setup_windows.ps1
+```
+
+Or perform the steps manually:
+
 ```powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
@@ -79,7 +87,21 @@ Set a long, unique random value for `API_KEY` in `.env`. Keep `ALLOW_UNAUTHENTIC
 
 Do not share the API key or commit the `.env` file.
 
-### 5. Start the application
+### 5. Check and start the application
+
+Run the preflight check to confirm Python, FFmpeg, FFprobe, the subtitle filter and API key are configured:
+
+```powershell
+.\\scripts\\check_windows.ps1
+```
+
+Then launch the server with the loopback-only helper:
+
+```powershell
+.\\scripts\\run_windows.ps1
+```
+
+Or start it manually:
 
 ```powershell
 uvicorn app.main:app --host 127.0.0.1 --port 8000
