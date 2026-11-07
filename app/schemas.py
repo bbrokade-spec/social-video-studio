@@ -88,3 +88,9 @@ class AssetResponse(BaseModel):
     size_bytes: int
     sha256: str
     created_at: str
+
+
+class MediaExportRequest(BaseModel):
+    asset_ids: list[str] = Field(min_length=1, max_length=50)
+    profile: Literal["vertical", "landscape"] = "vertical"
+    fps: int = Field(default=30, ge=1, le=60)
